@@ -38,4 +38,4 @@ jobs:
           git add -A
           git commit -m "Update to ${GITHUB_REF_NAME}"
           git remote add aur ssh://aur@aur.archlinux.org/priestess-arknights.git
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git push aur master
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git push aur master --force
