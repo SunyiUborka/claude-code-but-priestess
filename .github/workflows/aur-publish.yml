@@ -27,11 +27,20 @@ jobs:
             echo "ERROR: PKGBUILD version ($PKGVER) does not match tag (${GITHUB_REF_NAME#v})"
             exit 1
           fi
-          git init aur
-          cp packaging/aur/{PKGBUILD,.SRCINFO,priestess.install,linux-compat.patch} aur/
+
+          mkdir -p aur
+          cp packaging/aur/PKGBUILD aur/
+          cp packaging/aur/.SRCINFO aur/
+          cp packaging/aur/priestess.install aur/
+          cp packaging/aur/linux-compat.patch aur/
+
+          cat aur/PKGBUILD | head -10
+
           cd aur
+          git init
           git config user.name "aklnaaw"
           git config user.email "aklnaaww@gmail.com"
+          git config init.defaultBranch master
           git add -A
           git commit -m "Update to ${GITHUB_REF_NAME}"
           git remote add aur ssh://aur@aur.archlinux.org/priestess-arknights.git
