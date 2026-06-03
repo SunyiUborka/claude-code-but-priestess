@@ -27,7 +27,7 @@ jobs:
           fi
 
           # Clone existing AUR repo
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git clone aur@aur.archlinux.org/priestess-arknights.git aur
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git clone ssh://aur@aur.archlinux.org/priestess-arknights.git aur
           cd aur
 
           # Replace files with new versions
