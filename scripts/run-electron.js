@@ -15,7 +15,7 @@ const projectRoot = path.join(__dirname, "..");
 const projectPackage = require(path.join(projectRoot, "package.json"));
 const packagedAppId =
   (projectPackage.build && projectPackage.build.appId) ||
-  "local.claude-code-but-priestess.menubar";
+  "local.priestess-arknights.menubar";
 
 function runPlistBuddy(plistPath, command) {
   return spawnSync("/usr/libexec/PlistBuddy", ["-c", command, plistPath], {

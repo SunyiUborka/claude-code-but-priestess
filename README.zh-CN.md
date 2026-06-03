@@ -1,4 +1,4 @@
-# claude-code-but-Priestess
+# priestess-arknights
 
 语言：[English](README.md) | **简体中文**
 
@@ -21,17 +21,17 @@
     <img src="https://img.shields.io/badge/AUR-priestess--arknights-1793d1?style=for-the-badge&logo=arch-linux&logoColor=white" alt="AUR 软件包">
   </a>
   &nbsp;
-  <a href="https://github.com/aklnaaw/claude-code-but-priestess/releases/latest">
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
     <img src="https://img.shields.io/badge/下载-Linux%20(AppImage)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="下载 Linux 版">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/aklnaaw/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/github/v/release/aklnaaw/claude-code-but-priestess?label=最新版本&style=flat-square&color=2a6df4" alt="最新版本">
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
+    <img src="https://img.shields.io/github/v/release/aklnaaw/priestess-arknights?label=最新版本&style=flat-square&color=2a6df4" alt="最新版本">
   </a>
-  <a href="https://github.com/aklnaaw/claude-code-but-priestess/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/claude-code-but-priestess/ci.yml?style=flat-square&label=CI" alt="CI 状态">
+  <a href="https://github.com/aklnaaw/priestess-arknights/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/priestess-arknights/ci.yml?style=flat-square&label=CI" alt="CI 状态">
   </a>
 </p>
 
@@ -90,19 +90,19 @@ PRTS_SHOW_ON_START=1 priestess
 
 ### Linux（AppImage / 预编译包）
 
-前往 [latest release](https://github.com/aklnaaw/claude-code-but-priestess/releases/latest)
+前往 [latest release](https://github.com/aklnaaw/priestess-arknights/releases/latest)
 下载 Linux `.AppImage` 或解压即用的 `.tar.gz`。
 
 ```sh
-chmod +x PRTS-*.AppImage
-./PRTS-*.AppImage
+chmod +x priestess-arknights-*.AppImage
+./priestess-arknights-*.AppImage
 ```
 
 ### 从源码构建
 
 ```sh
-git clone https://github.com/aklnaaw/claude-code-but-priestess.git
-cd claude-code-but-priestess
+git clone https://github.com/aklnaaw/priestess-arknights.git
+cd priestess-arknights
 npm install
 npm run dev
 ```
@@ -117,8 +117,8 @@ npm run dev
 克隆仓库、装依赖、启动开发模式：
 
 ```sh
-git clone https://github.com/aklnaaw/claude-code-but-priestess.git
-cd claude-code-but-priestess
+git clone https://github.com/aklnaaw/priestess-arknights.git
+cd priestess-arknights
 npm install
 npm run dev
 ```

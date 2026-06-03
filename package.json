@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-but-priestess",
+  "name": "priestess-arknights",
   "version": "0.5.1",
   "description": "A cross-platform tray companion that lets you chat with 普瑞赛斯, backed by local Claude Code or Codex CLI usage.",
   "main": "src/main/main.js",
@@ -29,8 +29,8 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "local.claude-code-but-priestess.menubar",
-    "productName": "PRTS",
+    "appId": "local.priestess-arknights.menubar",
+    "productName": "priestess-arknights",
     "files": [
       "src/**/*",
       "assets/**/*",

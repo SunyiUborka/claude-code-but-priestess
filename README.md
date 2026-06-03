@@ -1,4 +1,4 @@
-# claude-code-but-Priestess
+# priestess-arknights
 
 Language: **English** | [简体中文](README.zh-CN.md)
 
@@ -22,17 +22,17 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
     <img src="https://img.shields.io/badge/AUR-priestess--arknights-1793d1?style=for-the-badge&logo=arch-linux&logoColor=white" alt="AUR package">
   </a>
   &nbsp;
-  <a href="https://github.com/aklnaaw/claude-code-but-priestess/releases/latest">
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
     <img src="https://img.shields.io/badge/Download-Linux%20(AppImage)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/aklnaaw/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/github/v/release/aklnaaw/claude-code-but-priestess?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
+    <img src="https://img.shields.io/github/v/release/aklnaaw/priestess-arknights?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
   </a>
-  <a href="https://github.com/aklnaaw/claude-code-but-priestess/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/claude-code-but-priestess/ci.yml?style=flat-square&label=CI" alt="CI status">
+  <a href="https://github.com/aklnaaw/priestess-arknights/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/priestess-arknights/ci.yml?style=flat-square&label=CI" alt="CI status">
   </a>
 </p>
 
@@ -106,19 +106,19 @@ PRTS_SHOW_ON_START=1 priestess
 
 ### Linux (AppImage / prebuilt)
 
-Go to the [latest release](https://github.com/aklnaaw/claude-code-but-priestess/releases/latest)
+Go to the [latest release](https://github.com/aklnaaw/priestess-arknights/releases/latest)
 and download the Linux `.AppImage` or `.tar.gz`.
 
 ```sh
-chmod +x PRTS-*.AppImage
-./PRTS-*.AppImage
+chmod +x priestess-arknights-*.AppImage
+./priestess-arknights-*.AppImage
 ```
 
 ### Build from source
 
 ```sh
-git clone https://github.com/aklnaaw/claude-code-but-priestess.git
-cd claude-code-but-priestess
+git clone https://github.com/aklnaaw/priestess-arknights.git
+cd priestess-arknights
 npm install
 npm run dev
 ```
@@ -135,8 +135,8 @@ npm run dev
 Clone the repo, install dependencies, and start the Electron dev process:
 
 ```sh
-git clone https://github.com/aklnaaw/claude-code-but-priestess.git
-cd claude-code-but-priestess
+git clone https://github.com/aklnaaw/priestess-arknights.git
+cd priestess-arknights
 npm install
 npm run dev
 ```
