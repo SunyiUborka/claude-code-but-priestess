@@ -16,7 +16,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/id_rsa_aur
           chmod 600 ~/.ssh/id_rsa_aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
 
       - name: Push to AUR
         run: |
@@ -26,16 +26,16 @@ jobs:
             exit 1
           fi
 
-          mkdir -p aur
-          cp packaging/aur/PKGBUILD aur/
-          cp packaging/aur/priestess.install aur/
-
+          # Clone existing AUR repo
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git clone aur@aur.archlinux.org/priestess-arknights.git aur
           cd aur
-          git init
+
+          # Replace files with new versions
+          cp ../packaging/aur/PKGBUILD .
+          cp ../packaging/aur/priestess.install .
+
           git config user.name "aklnaaw"
           git config user.email "aklnaaww@gmail.com"
-          git config init.defaultBranch master
           git add -A
           git commit -m "Update to ${GITHUB_REF_NAME}"
-          git remote add aur ssh://aur@aur.archlinux.org/priestess-arknights.git
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git push aur master --force
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git push origin master
