@@ -6,7 +6,11 @@ Language: **English** | [简体中文](README.zh-CN.md)
   <img src="assets/character/睁眼.png" alt="Priestess (普瑞赛斯)" width="220">
 </p>
 
-A macOS menu bar and Windows system tray companion. The character (普瑞赛斯, from Arknights) lives in
+> **Linux 适配分支** — 基于上游 [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)，
+> 添加了 Linux (Wayland/X11) 托盘支持、AUR 打包和中文界面。
+> macOS / Windows 相关内容请移步上游仓库。
+
+A Linux system tray companion. The character (普瑞赛斯, from Arknights) lives in
 your tray area as a small head icon. Click her and a popover opens with
 the character on top and a chat box below — you talk to her, she answers
 through your selected local coding CLI.
@@ -14,31 +18,32 @@ through your selected local coding CLI.
 No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 
 <p align="center">
-  <a href="https://github.com/SVAH-X/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/badge/Download-macOS-2a6df4?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS">
+  <a href="https://aur.archlinux.org/packages/priestess-arknights">
+    <img src="https://img.shields.io/badge/AUR-priestess--arknights-1793d1?style=for-the-badge&logo=arch-linux&logoColor=white" alt="AUR package">
   </a>
   &nbsp;
-  <a href="https://github.com/SVAH-X/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Windows-5a9bd4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows (experimental)">
+  <a href="https://github.com/aklnaaw/claude-code-but-priestess/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Linux%20(AppImage)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/SVAH-X/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/github/v/release/SVAH-X/claude-code-but-priestess?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
+  <a href="https://github.com/aklnaaw/claude-code-but-priestess/releases/latest">
+    <img src="https://img.shields.io/github/v/release/aklnaaw/claude-code-but-priestess?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
+  </a>
+  <a href="https://github.com/aklnaaw/claude-code-but-priestess/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/claude-code-but-priestess/ci.yml?style=flat-square&label=CI" alt="CI status">
   </a>
 </p>
 
-> Prebuilt builds are on
-> **[Releases](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest)** —
-> macOS `.dmg` and Windows `.exe`/`.zip`, no Node toolchain required.
-> (Windows builds are experimental and unsigned — see below.)
+> **仅 Linux 平台。** 本 fork 移除了 macOS / Windows 专属逻辑并专门针对 Linux 桌面修复适配。
+> 支持 Wayland（Niri、GNOME、KDE）和 X11 会话。
 
 ## Features
 
-- Menu bar accessory (`LSUIElement = true`), no Dock icon.
+- Tray icon, no taskbar window
 - Tray icon = centered `assets/character/icon.png` with a cropped-head fallback.
-- Click the icon → popover under the menu bar with:
+- Click the icon → popover near the tray icon with:
   - The character, breathing and blinking in idle.
   - Chat history.
   - Input box (Shift+Enter for newline, Enter to send).
@@ -77,82 +82,75 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 
 ## Download & install (for users)
 
-### macOS (prebuilt)
+### Arch Linux (AUR)
 
-The easiest way to run PRTS — no source checkout required.
+```sh
+# 从 AUR 安装（推荐）
+yay -S priestess-arknights
 
-1. Open the [latest release](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest)
-   and download **`PRTS-<version>-arm64.dmg`**.
-2. Open the DMG and drag **PRTS.app** into `/Applications`.
-3. First launch will be blocked by Gatekeeper (*"Apple could not verify
-   PRTS is free of malware"*) because the build is not signed with an Apple
-   Developer ID. Bypass it once with either:
+# 或者使用 paru
+paru -S priestess-arknights
+```
 
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/PRTS.app
-   ```
+安装后运行：
 
-   …or right-click `PRTS.app` → **Open** → confirm **Open** in the dialog.
-4. Click the chibi icon at the top-right of your screen to open the chat.
+```sh
+priestess
+```
 
-### Windows
+若在 Wayland 会话下托盘图标不可见（如 Niri、GNOME Wayland），可设置环境变量让启动时直接弹出聊天窗口：
 
-> **Experimental.** Windows builds are produced automatically by CI but have
-> not been runtime-tested by the maintainer, and they are unsigned. Please
-> [report](https://github.com/SVAH-X/claude-code-but-priestess/issues) anything
-> that breaks.
+```sh
+PRTS_SHOW_ON_START=1 priestess
+```
 
-1. From the [latest release](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest),
-   download either **`PRTS.Setup.<version>.exe`** (installer) or
-   **`PRTS-<version>-win.zip`** (portable, just unzip and run `PRTS.exe`).
-2. Run it. Windows SmartScreen will warn about an unknown publisher (the build
-   is not code-signed) — click **More info → Run anyway**.
-3. Click the PRTS icon in the notification area to open the chat. Windows may
-   tuck it into the hidden-icons overflow (the `^` on the taskbar).
+### Linux (AppImage / 预编译包)
 
-**System requirements**
+前往 [latest release](https://github.com/aklnaaw/claude-code-but-priestess/releases/latest)
+下载 Linux `.AppImage` 或解压即用的 `.tar.gz`。
 
-- macOS on **Apple Silicon** (M1 / M2 / M3 / M4) — prebuilt `.dmg`. Intel Macs
-  are not in this build.
-- Windows 10 / 11 (x64) — prebuilt installer / `.zip` (experimental, unsigned).
-- A local install of either the [Claude Code](https://claude.ai/code) CLI
-  (`claude`) or the OpenAI [Codex](https://platform.openai.com/docs/codex) CLI
-  (`codex`), already authenticated. See **[Usage backends](#usage-backends)**
-  below.
+```sh
+chmod +x PRTS-*.AppImage
+./PRTS-*.AppImage
+```
 
-> Can't find the icon in the menu bar after install? On Macs with a notch,
-> macOS hides overflow status icons behind it. Free a slot by ⌘-dragging
-> existing icons out, or install a menu-bar manager such as
-> [Ice](https://github.com/jordanbaird/Ice) or Bartender.
+### 从源码构建
+
+```sh
+git clone https://github.com/aklnaaw/claude-code-but-priestess.git
+cd claude-code-but-priestess
+npm install
+npm run dev
+```
+
+**系统要求**
+
+- Linux x86_64，支持 Wayland 或 X11 会话
+- 需要安装 [Claude Code](https://claude.ai/code) CLI（`claude`）或 [Codex](https://platform.openai.com/docs/codex) CLI（`codex`）
+  其中之一，且已登录认证。详见 **[使用后端](#usage-backends)**。
 
 ## Build from source (for developers)
 
 Clone the repo, install dependencies, and start the Electron dev process:
 
 ```sh
-git clone https://github.com/SVAH-X/claude-code-but-priestess.git
+git clone https://github.com/aklnaaw/claude-code-but-priestess.git
 cd claude-code-but-priestess
 npm install
 npm run dev
 ```
 
-Then look in the macOS menu bar or Windows notification area.
-
-> On macOS 26 (Tahoe), `npm run dev` launches the dev app through LaunchServices
-> and ad-hoc re-signs it so its menu-bar icon actually shows — Tahoe's menu-bar
-> permission silently hides status items from bare-`electron .` launches and
-> unsigned bundles.
+Then look in the system tray. 在 Wayland 下需要确保你的桌面环境支持
+StatusNotifierItem 协议（GNOME 需安装 AppIndicator 扩展）。
 
 To produce artifacts for the current operating system:
 
 ```sh
 npm run dist          # builds for the host architecture
+npm run dist:linux    # Linux only: AppImage + deb
 ```
 
-Artifacts land in `dist/`. Use `npm run dist:win` for Windows or
-`npm run dist:mac` for macOS. To target both macOS architectures, run with
-`electron-builder --mac --arm64 --x64` (or `--universal` for one combined
-binary).
+Artifacts land in `dist/`.
 
 ## Usage backends
 
@@ -167,7 +165,7 @@ Supported local CLIs:
 Backend selection is automatic:
 
 - If both `claude` and `codex` are available, the tray context menu shows both
-  choices. Claude Code is the default on macOS; Codex is the default on Windows.
+  choices. Claude Code is the default.
 - If only `claude` is available, the app locks to Claude Code and does not
   show Codex as a selectable option.
 - If only `codex` is available, the app locks to Codex and does not show
@@ -200,22 +198,17 @@ so the selected backend can use the right working tree.
 
 All persistent app-owned data is stored in Electron's `userData` directory,
 not inside this repository and not inside the selected chat working directory.
-Use the tray menu item `Reveal data folder` to open the exact directory.
+Use the tray menu item `打开数据文件夹` to open the exact directory.
 
-Typical packaged macOS path:
-
-```text
-~/Library/Application Support/PRTS/
-```
-
-Typical packaged Windows path:
+Typical paths:
 
 ```text
-%APPDATA%\PRTS\
-```
+# Packaged (AppImage / deb / AUR)
+~/.config/PRTS/
 
-In development builds, Electron may choose a development-specific `userData`
-path. The tray menu is the source of truth.
+# Development build
+~/.config/Electron/
+```
 
 Files stored there:
 
@@ -289,7 +282,7 @@ The renderer expects these files in `assets/character`:
 
 - `睁眼.png`, `半眯眼.png`, `快闭眼.png`, `闭眼.png`
 - `笑.png`, `生气.png`, `威胁.png`, `哭唧唧.png`, `睡觉.png`
-- `icon.png` for the centered menu bar icon
+- `icon.png` for the tray icon
 
 The PNGs are not modified on disk; the renderer flood-fills the
 edge-connected white background at runtime so the character sits cleanly on
