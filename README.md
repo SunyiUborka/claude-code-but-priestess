@@ -6,9 +6,9 @@ Language: **English** | [简体中文](README.zh-CN.md)
   <img src="assets/character/睁眼.png" alt="Priestess (普瑞赛斯)" width="220">
 </p>
 
-> **Linux 适配分支** — 基于上游 [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)，
-> 添加了 Linux (Wayland/X11) 托盘支持、AUR 打包和中文界面。
-> macOS / Windows 相关内容请移步上游仓库。
+> **Linux fork** — based on [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess),
+> with Linux (Wayland/X11) tray support, AUR packaging, and Chinese i18n.
+> See the upstream repo for macOS / Windows versions.
 
 A Linux system tray companion. The character (普瑞赛斯, from Arknights) lives in
 your tray area as a small head icon. Click her and a popover opens with
@@ -36,8 +36,8 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
   </a>
 </p>
 
-> **仅 Linux 平台。** 本 fork 移除了 macOS / Windows 专属逻辑并专门针对 Linux 桌面修复适配。
-> 支持 Wayland（Niri、GNOME、KDE）和 X11 会话。
+> **Linux only.** This fork removes macOS / Windows specific logic and adds
+> Linux desktop compatibility fixes. Supports Wayland (Niri, GNOME, KDE) and X11 sessions.
 
 ## Features
 
@@ -85,36 +85,36 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 ### Arch Linux (AUR)
 
 ```sh
-# 从 AUR 安装（推荐）
+# Install from AUR (recommended)
 yay -S priestess-arknights
 
-# 或者使用 paru
+# Or with paru
 paru -S priestess-arknights
 ```
 
-安装后运行：
+Run after installation:
 
 ```sh
 priestess
 ```
 
-若在 Wayland 会话下托盘图标不可见（如 Niri、GNOME Wayland），可设置环境变量让启动时直接弹出聊天窗口：
+If the tray icon is not visible under Wayland (Niri, GNOME Wayland), set the environment variable to show the popover immediately at launch:
 
 ```sh
 PRTS_SHOW_ON_START=1 priestess
 ```
 
-### Linux (AppImage / 预编译包)
+### Linux (AppImage / prebuilt)
 
-前往 [latest release](https://github.com/aklnaaw/claude-code-but-priestess/releases/latest)
-下载 Linux `.AppImage` 或解压即用的 `.tar.gz`。
+Go to the [latest release](https://github.com/aklnaaw/claude-code-but-priestess/releases/latest)
+and download the Linux `.AppImage` or `.tar.gz`.
 
 ```sh
 chmod +x PRTS-*.AppImage
 ./PRTS-*.AppImage
 ```
 
-### 从源码构建
+### Build from source
 
 ```sh
 git clone https://github.com/aklnaaw/claude-code-but-priestess.git
@@ -123,11 +123,12 @@ npm install
 npm run dev
 ```
 
-**系统要求**
+**System requirements**
 
-- Linux x86_64，支持 Wayland 或 X11 会话
-- 需要安装 [Claude Code](https://claude.ai/code) CLI（`claude`）或 [Codex](https://platform.openai.com/docs/codex) CLI（`codex`）
-  其中之一，且已登录认证。详见 **[使用后端](#usage-backends)**。
+- Linux x86_64 with Wayland or X11
+- A local install of either [Claude Code](https://claude.ai/code) CLI (`claude`)
+  or [Codex](https://platform.openai.com/docs/codex) CLI (`codex`),
+  already authenticated. See **[Usage backends](#usage-backends)** below.
 
 ## Build from source (for developers)
 
@@ -140,8 +141,9 @@ npm install
 npm run dev
 ```
 
-Then look in the system tray. 在 Wayland 下需要确保你的桌面环境支持
-StatusNotifierItem 协议（GNOME 需安装 AppIndicator 扩展）。
+Then look in the system tray. Under Wayland, ensure your compositor supports the
+StatusNotifierItem protocol (GNOME users need the
+[AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/)).
 
 To produce artifacts for the current operating system:
 
@@ -198,7 +200,7 @@ so the selected backend can use the right working tree.
 
 All persistent app-owned data is stored in Electron's `userData` directory,
 not inside this repository and not inside the selected chat working directory.
-Use the tray menu item `打开数据文件夹` to open the exact directory.
+Use the tray menu item `Reveal data folder` to open the exact directory.
 
 Typical paths:
 
@@ -256,8 +258,7 @@ Long-term memory is intentionally conservative:
   `CONVERSATION_ARCHIVE.jsonl` are kept.
 - After a clear, long-term memory enters dormant mode. New turns do not inject
   old memory content unless the user's prompt asks to remember something or
-  references earlier conversations, for example "remember", "memory", "上次",
-  "之前", "以前", "我们聊过", or "你还记得".
+  references earlier conversations.
 
 This keeps normal fresh sessions lightweight while still allowing either
 backend to recover prior context when the user actually asks for it.
@@ -268,7 +269,7 @@ These files define the important behavior:
 
 | File | Role |
 | --- | --- |
-| `src/main/persona.js` | Constructs the 普瑞赛斯 / Priestess persona prompt, defines memory file paths, and controls when long memory is injected. |
+| `src/main/persona.js` | Constructs the Priestess persona prompt, defines memory file paths, and controls when long memory is injected. |
 | `src/main/chat.js` | Detects local Claude/Codex CLIs, chooses the active backend, launches subprocesses, parses streaming output, persists archive/summary data, and shares context across backends. |
 | `src/main/main.js` | Electron main process: tray icon, context menu, backend menu rendering, settings persistence, conversation persistence, and app lifecycle. |
 | `src/main/settings.js` | Default app settings and `settings.json` persistence. |
