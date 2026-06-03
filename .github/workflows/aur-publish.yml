@@ -1,0 +1,33 @@
+name: Publish to AUR
+
+  on:
+    push:
+      tags:
+        - "v*"
+
+          run: |
+            mkdir -p ~/.ssh
+            echo "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/id_rsa_aur
+            chmod 600 ~/.ssh/id_rsa_aur
+            ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+
+        - name: Push to AUR
+          run: |
+            PKGVER=$(grep "^pkgver=" packaging/aur/PKGBUILD | cut -d= -f2)
+            echo "Package version: $PKGVER"
+            echo "Tag: ${GITHUB_REF_NAME#v}"
+            if [ "$PKGVER" != "${GITHUB_REF_NAME#v}" ]; then
+              echo "ERROR: PKGBUILD version ($PKGVER) does not match tag
+  (${GITHUB_REF_NAME#v})"
+              exit 1
+            fi
+            git init aur
+            cp
+  packaging/aur/{PKGBUILD,.SRCINFO,priestess.install,linux-compat.patch} aur/
+            cd aur
+            git config user.name "aklnaaw"
+            git config user.email "aklnaaww@gmail.com"
+            git add -A
+            git commit -m "Update to ${GITHUB_REF_NAME}"
+            git remote add aur ssh://aur@aur.archlinux.org/priestess-arknights.git
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git push aur master
