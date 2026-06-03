@@ -1,4 +1,8 @@
-# Maintainer: Your Name <your.email@example.com>
+# Maintainer: aklnaaw <aklnaaww@gmail.com>
+# Contributor: SVAH-X (original author)
+#
+# Linux fork of claude-code-but-priestess
+# Original: https://github.com/SVAH-X/claude-code-but-priestess
 
 pkgname=priestess-arknights
 _pkgreal=claude-code-but-priestess
