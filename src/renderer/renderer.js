@@ -1006,7 +1006,7 @@ function renderHistory(history) {
   if (!lastHistory.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "Say something to start.";
+    empty.textContent = "和她说点什么吧。";
     chatStream.append(empty);
     currentAssistantId = null;
     return;
@@ -1217,16 +1217,16 @@ composer.addEventListener("submit", async (event) => {
   }, 200);
   const result = await window.chatApi.send(text);
   if (result?.ok === false) {
-    showBubble(`Send failed: ${result.reason}`, 3000);
+    showBubble(`发送失败: ${result.reason}`, 3000);
   }
 });
 
 cancelBtn.addEventListener("click", () => window.chatApi.cancel());
 
 clearBtn.addEventListener("click", () => {
-  if (!confirm("Clear current session? Long-term memory will be kept.")) return;
+  if (!confirm("清除当前对话？长期记忆将继续保留。")) return;
   window.chatApi.clear();
-  showBubble("Conversation cleared.", 1800);
+  showBubble("对话已清除。", 1800);
 });
 
 window.chatApi.onHistory((history) => renderHistory(history));
@@ -1246,12 +1246,12 @@ window.chatApi.onStatus((event) => {
     resetInactivityTimers();
     if (event.error) {
       setBaseMood("cry");
-      showBubble(`Error: ${event.error}`, 4000);
+      showBubble(`错误: ${event.error}`, 4000);
       setTimeout(() => {
         if (baseMood === "cry") setBaseMood("idle");
       }, 2200);
     } else if (event.cancelled) {
-      showBubble("Stopped.", 1600);
+      showBubble("已停止。", 1600);
     } else {
       flashPunch(0.08);
       // Settle into the expression she chose for this reply; default to happy.
@@ -1305,16 +1305,16 @@ function refreshComposerMeta() {
   const provider = backendReady
     ? providerInfo?.shortLabel ||
       (activeProvider === "codex" ? "Codex" : activeProvider ? "Claude" : "No CLI")
-    : "No CLI";
+    : "未检测到 CLI";
   const cwd = (payload?.chatCwd || "").trim();
-  const queueSuffix = queueLength > 0 ? ` · ${queueLength} queued` : "";
-  const runningSuffix = chatRunning ? " · sends when ready" : "";
+  const queueSuffix = queueLength > 0 ? ` · ${queueLength} 排队中` : "";
+  const runningSuffix = chatRunning ? " · 发送中" : "";
   if (cwd) {
     const truncated = cwd.length > 42 ? "…" + cwd.slice(-41) : cwd;
-    cwdLine.textContent = `${provider} · cwd · ${truncated}${queueSuffix}${runningSuffix}`;
+    cwdLine.textContent = `${provider} · ${truncated}${queueSuffix}${runningSuffix}`;
     cwdLine.title = cwd;
   } else {
-    cwdLine.textContent = `${provider} · cwd · $HOME  ·  right-click tray to set${queueSuffix}${runningSuffix}`;
+    cwdLine.textContent = `${provider} · $HOME · 右键托盘菜单设置${queueSuffix}${runningSuffix}`;
     cwdLine.title = "";
   }
   if (providerBadge) providerBadge.textContent = provider;
@@ -1322,9 +1322,9 @@ function refreshComposerMeta() {
   sendBtn.disabled = !backendReady;
   composerInput.placeholder = backendReady
     ? chatRunning
-      ? "Message queues while she responds…  (Shift+Enter for newline)"
-      : "Talk to her…  (Shift+Enter for newline)"
-    : "Install Claude Code or Codex CLI first…";
+      ? "她在回复时可以继续输入消息排队…（Shift+Enter 换行）"
+      : "和她说点什么…（Shift+Enter 换行）"
+    : "请先安装 Claude Code 或 Codex CLI…";
 }
 
 function renderSettings(payload) {
@@ -1386,7 +1386,7 @@ loadAllFrames()
   })
   .catch((error) => {
     console.error("Failed to load frames:", error);
-    showBubble("Failed to load character frames.", 6000);
+    showBubble("角色立绘加载失败。", 6000);
   });
 
 window.chatApi.getHistory().then(renderHistory);

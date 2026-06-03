@@ -221,7 +221,9 @@ function createPopover() {
     // Resize only through the renderer's explicit edge handles. Native resize
     // on a frameless Windows window can treat a long press near the border as
     // an OS resize gesture and fight the custom drag implementation.
-    resizable: false,
+    // On Linux (Wayland) the custom pointer-screen delta approach doesn't
+    // work reliably, so enable native resize instead.
+    resizable: process.platform !== "darwin",
     movable: false,
     minimizable: false,
     maximizable: false,
@@ -248,7 +250,7 @@ function createPopover() {
     }
   });
 
-  popover.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  popover.setVisibleOnAllWorkspaces(true, process.platform === "darwin" ? { visibleOnFullScreen: true } : undefined);
   // Sit in the normal window stacking order — other apps can come over the
   // top. The popover still only disappears when the tray icon is clicked
   // again (no blur-to-hide handler), so it doesn't vanish on focus change.
@@ -271,10 +273,19 @@ function positionPopover() {
   const winBounds = popover.getBounds();
   // Center the popover beside the tray icon. Windows commonly puts the tray
   // at the bottom of the screen, while macOS puts it at the top.
-  let x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
-  const below = Math.round(trayBounds.y + trayBounds.height + 6);
-  const above = Math.round(trayBounds.y - winBounds.height - 6);
-  let y = below + winBounds.height <= work.y + work.height ? below : above;
+  // On Wayland (Niri, GNOME, KDE) tray.getBounds() may return all zeros;
+  // fall back to top-right of the primary display.
+  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0;
+  let x, y;
+  if (hasValidBounds) {
+    x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
+    const below = Math.round(trayBounds.y + trayBounds.height + 6);
+    const above = Math.round(trayBounds.y - winBounds.height - 6);
+    y = below + winBounds.height <= work.y + work.height ? below : above;
+  } else {
+    x = work.x + work.width - winBounds.width - 16;
+    y = work.y + 8;
+  }
   // Clamp inside the active display so we never spill off-screen.
   x = Math.max(work.x + 4, Math.min(work.x + work.width - winBounds.width - 4, x));
   y = Math.max(work.y + 4, Math.min(work.y + work.height - winBounds.height - 4, y));
@@ -351,7 +362,7 @@ function createDesktopPet() {
     backgroundColor: "#00000000",
     alwaysOnTop: true,
     focusable: true,
-    title: "PRTS Desktop Pet",
+    title: "PRTS 桌面宠物",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -526,10 +537,10 @@ async function toggleAgentMode(nextValue) {
     const warning = platform.agentModeWarning();
     const result = await dialog.showMessageBox({
       type: "warning",
-      title: "Enable agent mode?",
+      title: "开启代理模式？",
       message: warning.message,
       detail: warning.detail,
-      buttons: ["Cancel", "Enable agent mode"],
+      buttons: ["取消", "开启代理模式"],
       defaultId: 0,
       cancelId: 0
     });
@@ -553,7 +564,7 @@ function buildUsageBackendMenuItem() {
 
   if (available.length === 0) {
     return {
-      label: "Usage backend: no local CLI found",
+      label: "后端: 未检测到本地 CLI",
       enabled: false
     };
   }
@@ -561,13 +572,13 @@ function buildUsageBackendMenuItem() {
   if (available.length === 1) {
     const provider = availability.providers[available[0]];
     return {
-      label: `Usage backend: ${provider.label}`,
+      label: `后端: ${provider.label}`,
       enabled: false
     };
   }
 
   return {
-    label: "Usage backend",
+    label: "后端",
     submenu: available.map((providerKey) => {
       const provider = availability.providers[providerKey];
       return {
@@ -584,7 +595,7 @@ function buildContextMenu() {
   const all = settings.getAll();
   return Menu.buildFromTemplate([
     {
-      label: "Open Chat",
+      label: "打开对话",
       click: () => {
         if (!popover) createPopover();
         if (!popover.isVisible()) {
@@ -596,7 +607,7 @@ function buildContextMenu() {
     },
     { type: "separator" },
     {
-      label: "Agent mode (full screen control)",
+      label: "代理模式（全屏控制）",
       type: "checkbox",
       checked: Boolean(all.agentMode),
       click: (item) => {
@@ -605,14 +616,14 @@ function buildContextMenu() {
     },
     buildUsageBackendMenuItem(),
     {
-      label: "Auto-screenshot each turn",
+      label: "每轮自动截图",
       type: "checkbox",
       visible: Boolean(all.agentMode),
       checked: all.autoScreenshot !== false,
       click: (item) => settings.set({ autoScreenshot: item.checked })
     },
     {
-      label: "Desktop pet while idle",
+      label: "闲置时显示桌面宠物",
       type: "checkbox",
       checked: all.desktopPet !== false,
       click: (item) => {
@@ -625,26 +636,26 @@ function buildContextMenu() {
       }
     },
     {
-      label: "Show desktop pet now",
+      label: "显示桌面宠物",
       enabled: all.desktopPet !== false,
       click: () => showDesktopPet()
     },
     {
-      label: "Desktop pet size",
+      label: "桌面宠物大小",
       enabled: all.desktopPet !== false,
       submenu: Object.keys(DESKTOP_PET_SIZES).map((sizeKey) => ({
-        label: sizeKey[0].toUpperCase() + sizeKey.slice(1),
+        label: sizeKey === "small" ? "小" : sizeKey === "medium" ? "中" : "大",
         type: "radio",
         checked: (all.desktopPetSize || "medium") === sizeKey,
         click: () => setDesktopPetSize(sizeKey)
       }))
     },
     {
-      label: "Set chat directory…",
+      label: "设置聊天目录…",
       click: async () => {
         const current = (all.chatCwd || "").trim();
         const result = await dialog.showOpenDialog({
-          title: "Choose project folder for chat",
+          title: "选择聊天工作目录",
           defaultPath: current || app.getPath("home"),
           properties: ["openDirectory", "createDirectory"]
         });
@@ -654,18 +665,18 @@ function buildContextMenu() {
       }
     },
     {
-      label: "Clear chat directory",
+      label: "清除聊天目录",
       enabled: Boolean((all.chatCwd || "").trim()),
       click: () => settings.set({ chatCwd: "" })
     },
     { type: "separator" },
     {
-      label: "Reveal data folder",
+      label: "打开数据文件夹",
       click: () => shell.openPath(app.getPath("userData"))
     },
     { type: "separator" },
     {
-      label: "Quit",
+      label: "退出",
       accelerator: "CmdOrCtrl+Q",
       click: () => app.quit()
     }
@@ -677,7 +688,7 @@ function syncTrayTooltip() {
   const cwd = (settings.get("chatCwd") || "").trim();
   const availability = chat.getProviderAvailability({ refresh: false });
   const active = availability.activeProvider;
-  const provider = active ? availability.providers[active].shortLabel : "Ready";
+  const provider = active ? availability.providers[active].shortLabel : "就绪";
   tray.setToolTip(cwd ? `PRTS · ${provider} · ${cwd}` : `PRTS · ${provider}`);
 }
 
@@ -762,7 +773,7 @@ function maybeNotifyDoneNotification(event) {
   try {
     new Notification({
       title: "PRTS",
-      body: "Response complete.",
+      body: "回复完成。",
       silent: false
     }).show();
   } catch (error) {
@@ -852,6 +863,15 @@ app.whenReady().then(() => {
 
   createPopover();
   scheduleDesktopPet();
+
+  // On compositors without a visible system tray (Niri, GNOME Wayland
+  // without AppIndicator extension, etc.), the tray icon is registered as
+  // a StatusNotifierItem but may not be visible. Set PRTS_SHOW_ON_START=1
+  // to show the popover immediately at launch so the app is usable.
+  if (process.env.PRTS_SHOW_ON_START === "1") {
+    positionPopover();
+    showPopover();
+  }
 });
 
 app.on("window-all-closed", () => {
@@ -897,7 +917,7 @@ ipcMain.handle("settings:get", () => buildSettingsState());
 
 ipcMain.handle("settings:pick-cwd", async () => {
   const result = await dialog.showOpenDialog({
-    title: "Choose project folder for chat",
+    title: "选择聊天工作目录",
     defaultPath: settings.get("chatCwd") || app.getPath("home"),
     properties: ["openDirectory", "createDirectory"]
   });

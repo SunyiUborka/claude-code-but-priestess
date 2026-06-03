@@ -96,6 +96,16 @@ function ensureValidSignature(devApp) {
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
+// On Linux, hint Electron to use the Wayland backend so the tray icon
+// appears via the StatusNotifierItem protocol (required on Niri, GNOME
+// Wayland, KDE Wayland, and other compositors without X11 systray).
+if (process.platform === "linux") {
+  env.ELECTRON_OZONE_PLATFORM_HINT = env.ELECTRON_OZONE_PLATFORM_HINT || "auto";
+  // Suppress the misleading XDG activation token warning at startup.
+  env.ELECTRON_ENABLE_WAYLAND_ACTIVATION_TOKEN_HACK =
+    env.ELECTRON_ENABLE_WAYLAND_ACTIVATION_TOKEN_HACK || "1";
+}
+
 let child;
 let logTail = null;
 let devAppPath = null;

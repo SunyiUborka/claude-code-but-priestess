@@ -11,6 +11,7 @@
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
     "lint": "node scripts/check-assets.js"
   },
   "keywords": [
@@ -36,6 +37,9 @@
       "!**/.DS_Store",
       "package.json"
     ],
+    "asarUnpack": [
+      "assets/**"
+    ],
     "directories": {
       "buildResources": "assets/build"
     },
@@ -55,6 +59,14 @@
         "nsis",
         "zip"
       ]
+    },
+    "linux": {
+      "icon": "assets/character/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
     },
     "nsis": {
       "oneClick": false,

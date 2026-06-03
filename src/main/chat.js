@@ -112,6 +112,9 @@ function commonBinDirs() {
     path.join(home, ".deno", "bin"),
     path.join(home, ".codex", "bin"),
     path.join(home, ".claude", "local"),
+    "/home/linuxbrew/.linuxbrew/bin",
+    "/snap/bin",
+    "/var/lib/flatpak/exports/bin",
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
@@ -1249,7 +1252,7 @@ function send(text) {
   const providerInfo = ensureProviderAvailability()[provider];
   if (!providerInfo?.available) {
     pushSystem(
-      "No local Claude Code or Codex CLI was found. Install and authenticate one of them, then reopen the tray menu or send again."
+      "未检测到 Claude Code 或 Codex CLI。请安装并登录其中任一，然后重新打开托盘菜单或再次发送消息。"
     );
     emitStatus("idle", { error: "missing-cli" });
     return { ok: false, reason: "missing-cli" };
@@ -1342,7 +1345,7 @@ async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTra
   } catch (error) {
     turnLaunching = false;
     pushSystem(
-      `Failed to launch \`${providerLabel(provider)}\`: ${error.message}. Is the CLI installed and on PATH?`
+      `启动 \`${providerLabel(provider)}\` 失败: ${error.message}。请确认 CLI 已安装且在 PATH 中。`
     );
     finalizeAssistant("");
     currentProvider = null;
@@ -1366,7 +1369,7 @@ async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTra
       } catch (error) {
         if (shouldIgnoreNonJsonLine(line)) continue;
         // Non-JSON line — surface as system note for transparency.
-        pushSystem(`Unparsed: ${line.slice(0, 200)}`);
+        pushSystem(`未解析的输出: ${line.slice(0, 200)}`);
       }
     }
   });
@@ -1377,7 +1380,7 @@ async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTra
 
   proc.on("error", (error) => {
     if (currentProcess !== proc) return;
-    pushSystem(`\`${providerLabel(provider)}\` process error: ${error.message}`);
+    pushSystem(`\`${providerLabel(provider)}\` 进程出错: ${error.message}`);
     finalizeAssistant("");
     currentProcess = null;
     currentProvider = null;
@@ -1425,7 +1428,7 @@ async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTra
     if (code !== 0 && code !== null) {
       const stderrSummary = stderrText.slice(-400);
       pushSystem(
-        `\`${providerLabel(provider)}\` exited with code ${code}.${stderrSummary ? "\n" + stderrSummary : ""}`
+        `\`${providerLabel(provider)}\` 退出码 ${code}。${stderrSummary ? "\n" + stderrSummary : ""}`
       );
     } else if (claudeResultErrored) {
       pushSystem(
