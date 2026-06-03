@@ -683,6 +683,12 @@ function buildContextMenu() {
   ]);
 }
 
+function updateContextMenu() {
+  if (tray && !tray.isDestroyed()) {
+    tray.setContextMenu(buildContextMenu());
+  }
+}
+
 function syncTrayTooltip() {
   if (!tray) return;
   const cwd = (settings.get("chatCwd") || "").trim();
@@ -807,11 +813,12 @@ app.whenReady().then(() => {
   tray.setIgnoreDoubleClickEvents(true);
 
   tray.on("click", () => togglePopover());
-  tray.on("right-click", () => tray.popUpContextMenu(buildContextMenu()));
+  updateContextMenu();
 
   setTimeout(() => {
     chat.refreshProviderAvailability();
     syncTrayTooltip();
+    updateContextMenu();
     if (popover && !popover.isDestroyed()) {
       popover.webContents.send("settings:state", buildSettingsState());
     }
@@ -819,6 +826,7 @@ app.whenReady().then(() => {
 
   settings.subscribe(() => {
     syncTrayTooltip();
+    updateContextMenu();
     if (popover && !popover.isDestroyed()) {
       popover.webContents.send("settings:state", buildSettingsState());
     }
