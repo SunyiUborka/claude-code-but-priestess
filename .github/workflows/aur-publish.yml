@@ -21,17 +21,14 @@ jobs:
       - name: Push to AUR
         run: |
           PKGVER=$(grep "^pkgver=" packaging/aur/PKGBUILD | cut -d= -f2)
-          echo "Package version: $PKGVER"
-          echo "Tag: ${GITHUB_REF_NAME#v}"
           if [ "$PKGVER" != "${GITHUB_REF_NAME#v}" ]; then
-            echo "ERROR: PKGBUILD version ($PKGVER) does not match tag (${GITHUB_REF_NAME#v})"
+            echo "ERROR: PKGBUILD version ($PKGVER) != tag (${GITHUB_REF_NAME#v})"
             exit 1
           fi
 
           mkdir -p aur
           cp packaging/aur/PKGBUILD aur/
           cp packaging/aur/priestess.install aur/
-          cp packaging/aur/linux-compat.patch aur/
 
           cd aur
           git init
