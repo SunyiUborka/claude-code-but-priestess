@@ -26,14 +26,11 @@ jobs:
             exit 1
           fi
 
-          # Clone existing AUR repo
           GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_aur" git clone ssh://aur@aur.archlinux.org/priestess-arknights.git aur
           cd aur
-
-          # Replace files with new versions
           cp ../packaging/aur/PKGBUILD .
+          cp ../packaging/aur/.SRCINFO .
           cp ../packaging/aur/priestess.install .
-
           git config user.name "aklnaaw"
           git config user.email "aklnaaww@gmail.com"
           git add -A
