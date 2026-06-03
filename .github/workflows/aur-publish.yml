@@ -30,11 +30,8 @@ jobs:
 
           mkdir -p aur
           cp packaging/aur/PKGBUILD aur/
-          cp packaging/aur/.SRCINFO aur/
           cp packaging/aur/priestess.install aur/
           cp packaging/aur/linux-compat.patch aur/
-
-          cat aur/PKGBUILD | head -10
 
           cd aur
           git init
