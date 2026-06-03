@@ -49,14 +49,41 @@ source=("${url}.git#branch=main")
 sha256sums=('SKIP')
 
 build() {
-  cd "${srcdir}/${_pkgreal}"
+  cd "${srcdir}"
+
+  # Locate the source directory (makepkg may name it differently for git sources)
+  local _srcdir
+  if [[ -d "${_pkgreal}" ]]; then
+    _srcdir="${_pkgreal}"
+  elif [[ -d "${_pkgreal}.git" ]]; then
+    _srcdir="${_pkgreal}.git"
+  elif [[ -L "${_pkgreal}.git#branch=main" ]]; then
+    _srcdir="${_pkgreal}.git#branch=main"
+  else
+    _srcdir="$(find . -maxdepth 1 -type d ! -path . | head -1)"
+    _srcdir="${_srcdir#./}"
+  fi
+
+  cd "${_srcdir}"
 
   npm install
   npx electron-builder --linux dir
 }
 
 package() {
-  cd "${srcdir}/${_pkgreal}"
+  # Same source directory detection as build()
+  local _srcdir
+  if [[ -d "${_pkgreal}" ]]; then
+    _srcdir="${_pkgreal}"
+  elif [[ -d "${_pkgreal}.git" ]]; then
+    _srcdir="${_pkgreal}.git"
+  elif [[ -L "${_pkgreal}.git#branch=main" ]]; then
+    _srcdir="${_pkgreal}.git#branch=main"
+  else
+    _srcdir="$(find "${srcdir}" -maxdepth 1 -type d ! -path "${srcdir}" | head -1)"
+  fi
+
+  cd "${srcdir}/${_srcdir}"
 
   local build_dir
   if [[ -d "dist/linux-unpacked" ]]; then
