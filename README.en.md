@@ -1,4 +1,4 @@
-# claude-code-but-Priestess
+# priestess-arknights
 
 Language: [简体中文](README.md) | **English**
 
@@ -6,7 +6,11 @@ Language: [简体中文](README.md) | **English**
   <img src="assets/character/睁眼.png" alt="Priestess (普瑞赛斯)" width="220">
 </p>
 
-A macOS menu bar and Windows system tray companion. The character (普瑞赛斯, from Arknights) lives in
+> **Linux fork** — based on [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess),
+> adding Linux (Wayland/X11) tray support, AUR packaging, and Chinese i18n.
+> See the upstream repo for macOS / Windows versions.
+
+A Linux system tray companion. The character (普瑞赛斯, from Arknights) lives in
 your tray area as a small head icon. Click her and a popover opens with
 the character on top and a chat box below — you talk to her, she answers
 through your selected local coding CLI.
@@ -14,25 +18,28 @@ through your selected local coding CLI.
 No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 
 <p align="center">
-  <a href="https://github.com/SVAH-X/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/badge/Download-macOS-2a6df4?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS">
+  <a href="https://aur.archlinux.org/packages/priestess-arknights">
+    <img src="https://img.shields.io/badge/AUR-priestess--arknights-1793d1?style=for-the-badge&logo=arch-linux&logoColor=white" alt="AUR package">
   </a>
   &nbsp;
-  <a href="https://github.com/SVAH-X/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Windows-5a9bd4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows (experimental)">
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Linux%20(AppImage%20%7C%20deb)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/SVAH-X/claude-code-but-priestess/releases/latest">
-    <img src="https://img.shields.io/github/v/release/SVAH-X/claude-code-but-priestess?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
+    <img src="https://img.shields.io/github/v/release/aklnaaw/priestess-arknights?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
+  </a>
+  <a href="https://github.com/aklnaaw/priestess-arknights/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/priestess-arknights/ci.yml?style=flat-square&label=CI" alt="CI status">
   </a>
 </p>
 
-> Prebuilt builds are on
-> **[Releases](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest)** —
-> macOS `.dmg` and Windows `.exe`/`.zip`, no Node toolchain required.
-> (Windows builds are experimental and unsigned — see below.)
+> **Linux only.** This fork ships **only AppImage and deb** in GitHub Releases.
+> See upstream for macOS / Windows versions.
+>
+> **Arch Linux?** Install from AUR: `yay -S priestess-arknights`
 
 ## Features
 
@@ -99,94 +106,92 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 
 ## Download & install (for users)
 
-### macOS (prebuilt)
+This repository provides **AppImage and deb only** in GitHub Releases.
 
-The easiest way to run PRTS — no source checkout required.
+### Arch Linux (AUR — recommended)
 
-1. Open the [latest release](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest)
-   and download **`PRTS-<version>-arm64.dmg`**.
-2. Open the DMG and drag **PRTS.app** into `/Applications`.
-3. First launch will be blocked by Gatekeeper (*"Apple could not verify
-   PRTS is free of malware"*) because the build is not signed with an Apple
-   Developer ID. Bypass it once with either:
+```sh
+# via yay
+yay -S priestess-arknights
 
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/PRTS.app
-   ```
+# or paru
+paru -S priestess-arknights
+```
 
-   …or right-click `PRTS.app` → **Open** → confirm **Open** in the dialog.
-4. Click the chibi icon at the top-right of your screen to open the chat.
+Run after installation:
 
-### Windows
+```sh
+priestess
+```
 
-> **Experimental.** Windows builds are produced automatically by CI but have
-> not been runtime-tested by the maintainer, and they are unsigned. Please
-> [report](https://github.com/SVAH-X/claude-code-but-priestess/issues) anything
-> that breaks.
+If the tray icon is not visible under Wayland (Niri, GNOME Wayland), use:
 
-1. From the [latest release](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest),
-   download either **`PRTS.Setup.<version>.exe`** (installer) or
-   **`PRTS-<version>-win.zip`** (portable, just unzip and run `PRTS.exe`).
-2. Run it. Windows SmartScreen will warn about an unknown publisher (the build
-   is not code-signed) — click **More info → Run anyway**.
-3. Click the PRTS icon in the notification area to open the chat. Windows may
-   tuck it into the hidden-icons overflow (the `^` on the taskbar).
+```sh
+PRTS_SHOW_ON_START=1 priestess
+```
+
+### Linux (AppImage / deb)
+
+Go to the [latest release](https://github.com/aklnaaw/priestess-arknights/releases/latest)
+and download:
+
+| Format | File | Distros |
+|--------|------|---------|
+| **AppImage** | `priestess-arknights-*.AppImage` | All Linux, portable |
+| **deb** | `priestess-arknights_*_amd64.deb` | Debian / Ubuntu / derivatives |
+
+```sh
+# AppImage: just run it
+chmod +x priestess-arknights-*.AppImage
+./priestess-arknights-*.AppImage
+
+# deb: install with dpkg
+sudo dpkg -i priestess-arknights_*_amd64.deb
+priestess
+```
+
+Under Wayland without a visible tray, pass the env var:
+
+```sh
+PRTS_SHOW_ON_START=1 ./priestess-arknights-*.AppImage
+```
+
+> **GitHub Releases ships only AppImage and deb** — no `.tar.gz`, `.rpm`, or other formats.
 
 **Updates**
 
-- **Windows** updates itself: PRTS checks GitHub on launch, downloads a newer
-  release in the background, and installs it the next time you quit (or use the
-  tray's **Restart to update**). No more re-downloading by hand.
-- **macOS** can't self-install unsigned updates (Apple's restriction), so it
-  only *notifies* you when a newer version exists and opens the downloads page —
-  you still grab the new `.dmg` yourself.
-- Either way, the tray has a **Check for updates…** item. (Auto-update only
-  works from this version onward — older installs have no updater, so update to
-  this build manually once.)
+Linux does not support silent self-install. Use the tray menu **Check for updates…**
+to be notified of new releases.
 
 **System requirements**
 
-- macOS on **Apple Silicon** (M1 / M2 / M3 / M4) — prebuilt `.dmg`. Intel Macs
-  are not in this build.
-- Windows 10 / 11 (x64) — prebuilt installer / `.zip` (experimental, unsigned).
+- Linux x86_64, Wayland or X11 session
 - A local install of either the [Claude Code](https://claude.ai/code) CLI
   (`claude`) or the OpenAI [Codex](https://platform.openai.com/docs/codex) CLI
   (`codex`), already authenticated. See **[Usage backends](#usage-backends)**
   below.
 
-> Can't find the icon in the menu bar after install? On Macs with a notch,
-> macOS hides overflow status icons behind it. Free a slot by ⌘-dragging
-> existing icons out, or install a menu-bar manager such as
-> [Ice](https://github.com/jordanbaird/Ice) or Bartender.
-
 ## Build from source (for developers)
 
-Clone the repo, install dependencies, and start the Electron dev process:
-
 ```sh
-git clone https://github.com/SVAH-X/claude-code-but-priestess.git
-cd claude-code-but-priestess
+git clone https://github.com/aklnaaw/priestess-arknights.git
+cd priestess-arknights
 npm install
 npm run dev
 ```
 
-Then look in the macOS menu bar or Windows notification area.
+Then look in the system tray. Under Wayland, verify your compositor supports the
+StatusNotifierItem protocol (GNOME users need the
+[AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/)).
 
-> On macOS 26 (Tahoe), `npm run dev` launches the dev app through LaunchServices
-> and ad-hoc re-signs it so its menu-bar icon actually shows — Tahoe's menu-bar
-> permission silently hides status items from bare-`electron .` launches and
-> unsigned bundles.
-
-To produce artifacts for the current operating system:
+To produce artifacts for Linux:
 
 ```sh
 npm run dist          # builds for the host architecture
+npm run dist:linux    # Linux only: AppImage + deb
 ```
 
-Artifacts land in `dist/`. Use `npm run dist:win` for Windows or
-`npm run dist:mac` for macOS. To target both macOS architectures, run with
-`electron-builder --mac --arm64 --x64` (or `--universal` for one combined
-binary).
+Artifacts land in `dist/`.
 
 ## Usage backends
 
@@ -201,7 +206,7 @@ Supported local CLIs:
 Backend selection is automatic:
 
 - If both `claude` and `codex` are available, the tray context menu shows both
-  choices. Claude Code is the default on macOS; Codex is the default on Windows.
+  choices. Claude Code is the default on Linux.
 - If only `claude` is available, the app locks to Claude Code and does not
   show Codex as a selectable option.
 - If only `codex` is available, the app locks to Codex and does not show
@@ -236,16 +241,14 @@ All persistent app-owned data is stored in Electron's `userData` directory,
 not inside this repository and not inside the selected chat working directory.
 Use the tray menu item `Reveal data folder` to open the exact directory.
 
-Typical packaged macOS path:
+Typical Linux paths:
 
 ```text
-~/Library/Application Support/PRTS/
-```
+# Packaged (AppImage / deb / AUR)
+~/.config/PRTS/
 
-Typical packaged Windows path:
-
-```text
-%APPDATA%\PRTS\
+# Development build
+~/.config/Electron/
 ```
 
 In development builds, Electron may choose a development-specific `userData`

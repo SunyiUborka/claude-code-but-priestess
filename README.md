@@ -22,7 +22,7 @@
   </a>
   &nbsp;
   <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Linux%20(AppImage)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
+    <img src="https://img.shields.io/badge/下载-Linux%20(AppImage%20%7C%20deb)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
   </a>
 </p>
 
@@ -68,7 +68,12 @@
 
 ## 下载安装（普通用户）
 
+本仓库 GitHub Releases **仅提供 AppImage 和 deb 两种格式**。
+> 不再提供 `.tar.gz`、`.rpm` 或其他格式。
+
 ### Arch Linux（AUR，推荐）
+
+Arch Linux 用户推荐从 AUR 安装，自动处理依赖和更新：
 
 ```sh
 # 使用 yay 安装
@@ -90,14 +95,24 @@ priestess
 PRTS_SHOW_ON_START=1 priestess
 ```
 
-### Linux（AppImage / 预编译包）
+### Linux（AppImage / deb）
 
 前往 [最新 release](https://github.com/aklnaaw/priestess-arknights/releases/latest)
-下载 Linux 的 `.AppImage` 或 `.tar.gz`。
+选择对应格式下载：
+
+| 格式 | 文件 | 适用发行版 |
+|------|------|-----------|
+| **AppImage** | `priestess-arknights-*.AppImage` | 所有 Linux 发行版，解压即用 |
+| **deb** | `priestess-arknights_*_amd64.deb` | Debian / Ubuntu / 衍生版 |
 
 ```sh
+# AppImage：下载后直接运行
 chmod +x priestess-arknights-*.AppImage
 ./priestess-arknights-*.AppImage
+
+# deb：下载后用 dpkg 安装
+sudo dpkg -i priestess-arknights_*_amd64.deb
+priestess
 ```
 
 如需 Wayland 下直接显示窗口：
