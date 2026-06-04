@@ -18,6 +18,7 @@ const settings = require("./settings");
 const chat = require("./chat");
 const persona = require("./persona");
 const platform = require("./platform");
+const updater = require("./updater");
 
 let conversationFile = null;
 let saveTimer = null;
@@ -29,8 +30,12 @@ const POPOVER_DEFAULT_WIDTH = 380;
 const POPOVER_DEFAULT_HEIGHT = 560;
 const POPOVER_MIN_WIDTH = 320;
 const POPOVER_MIN_HEIGHT = 460;
-const POPOVER_MAX_WIDTH = 900;
-const POPOVER_MAX_HEIGHT = 1000;
+// Gap kept between the popover edge and the display work-area edge. The window
+// position is clamped 4px inside each side, so 8px total keeps the max size
+// consistent with that and prevents the window from spilling off-screen. There
+// is no fixed maximum: the active display's work area is the only ceiling, so
+// the popover can grow right up to the screen edges on large monitors.
+const POPOVER_EDGE_MARGIN = 8;
 const DESKTOP_PET_IDLE_MS = Number(process.env.PRTS_DESKTOP_PET_IDLE_MS) || 60 * 1000;
 const DESKTOP_PET_SIZES = Object.freeze({
   small: { width: 120, height: 144 },
@@ -139,8 +144,8 @@ function clampNumber(value, min, max) {
 
 function clampPopoverSize(size = {}, display = screen.getPrimaryDisplay()) {
   const work = display.workArea;
-  const maxWidth = Math.max(POPOVER_MIN_WIDTH, Math.min(POPOVER_MAX_WIDTH, work.width - 8));
-  const maxHeight = Math.max(POPOVER_MIN_HEIGHT, Math.min(POPOVER_MAX_HEIGHT, work.height - 8));
+  const maxWidth = Math.max(POPOVER_MIN_WIDTH, work.width - POPOVER_EDGE_MARGIN);
+  const maxHeight = Math.max(POPOVER_MIN_HEIGHT, work.height - POPOVER_EDGE_MARGIN);
   return {
     width: clampNumber(size.width ?? POPOVER_DEFAULT_WIDTH, POPOVER_MIN_WIDTH, maxWidth),
     height: clampNumber(size.height ?? POPOVER_DEFAULT_HEIGHT, POPOVER_MIN_HEIGHT, maxHeight)
@@ -175,8 +180,8 @@ function resizePopoverDrag({ edge = "se", start = {}, dx = 0, dy = 0 } = {}) {
   const e = String(edge);
   const right = sx + sw;
   const bottom = sy + sh;
-  const maxWidth = Math.max(POPOVER_MIN_WIDTH, Math.min(POPOVER_MAX_WIDTH, work.width - 8));
-  const maxHeight = Math.max(POPOVER_MIN_HEIGHT, Math.min(POPOVER_MAX_HEIGHT, work.height - 8));
+  const maxWidth = Math.max(POPOVER_MIN_WIDTH, work.width - POPOVER_EDGE_MARGIN);
+  const maxHeight = Math.max(POPOVER_MIN_HEIGHT, work.height - POPOVER_EDGE_MARGIN);
 
   let width = sw + (e.includes("e") ? dx : 0) - (e.includes("w") ? dx : 0);
   let height = sh + (e.includes("s") ? dy : 0) - (e.includes("n") ? dy : 0);
@@ -669,6 +674,12 @@ function buildContextMenu() {
       ]
     },
     {
+      label: "允许她使用技能（音乐 · 搜索 · 应用）",
+      type: "checkbox",
+      checked: all.skillsEnabled !== false,
+      click: (item) => settings.set({ skillsEnabled: item.checked })
+    },
+    {
       label: "代理模式（全屏控制）",
       type: "checkbox",
       checked: Boolean(all.agentMode),
@@ -736,6 +747,7 @@ function buildContextMenu() {
       label: "打开数据文件夹",
       click: () => shell.openPath(app.getPath("userData"))
     },
+    ...buildUpdateMenuItems(),
     { type: "separator" },
     {
       label: "退出",
@@ -743,6 +755,21 @@ function buildContextMenu() {
       click: () => app.quit()
     }
   ]);
+}
+
+// Update controls: a manual check plus, when something is waiting, an action
+// item (install now on Windows / open the download page on other platforms).
+function buildUpdateMenuItems() {
+  const pending = updater.getPendingUpdate();
+  const items = [{ label: "检查更新…", click: () => updater.checkNow() }];
+  if (pending) {
+    items.push(
+      pending.action === "install"
+        ? { label: `重启以更新 (v${pending.version})`, click: () => updater.installNow() }
+        : { label: `下载更新 (v${pending.version})…`, click: () => updater.openDownloadPage() }
+    );
+  }
+  return items;
 }
 
 function updateContextMenu() {
@@ -861,6 +888,13 @@ app.whenReady().then(() => {
     app.setActivationPolicy("accessory");
   }
 
+  if (process.platform === "win32") {
+    // A stable AppUserModelID so Windows attributes toast notifications (rest
+    // reminders, "update ready", "response complete") to PRTS — without it,
+    // toasts can be dropped or shown under a generic name.
+    app.setAppUserModelId("local.claude-code-but-priestess.menubar");
+  }
+
   settings.init();
   applyThemeSource();
   // Keep the opaque (non-macOS) popover fill aligned with the resolved
@@ -881,6 +915,10 @@ app.whenReady().then(() => {
 
   tray.on("click", () => togglePopover());
   updateContextMenu();
+
+  // Background update check (Windows self-updates; macOS notifies + opens the
+  // download page). No-op in dev / unpackaged builds.
+  updater.init();
 
   setTimeout(() => {
     chat.refreshProviderAvailability();

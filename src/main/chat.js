@@ -9,6 +9,7 @@ const os = require("node:os");
 const path = require("node:path");
 const settings = require("./settings");
 const persona = require("./persona");
+const skills = require("./skills");
 
 const PROVIDERS = Object.freeze({
   CLAUDE: "claude",
@@ -37,6 +38,8 @@ let currentProvider = null;
 let longMemoryDormant = true;
 let providerAvailability = null;
 let consecutiveQuestionReplies = 0;
+let turnSawToolUse = false;
+let assistantTextAfterLastTool = false;
 const BOUNDARY_QUIT_AFTER = 4;
 // Set when a Claude `result` arrives flagged is_error with no text — usually a
 // stale `--resume` session. The close handler uses it to self-heal (drop the
@@ -56,6 +59,18 @@ const MOOD_HEAD_MAX = 48;
 let moodHeadBuffer = "";
 let moodHeadResolved = false;
 let moodEmittedThisTurn = false;
+
+// Skill directives — she may emit a hidden [[skill:NAME ARG]] marker (see
+// persona.js) to trigger a curated local action (play music, search, open a
+// URL/app). Like the mood tag, PRTS strips it from everything the Doctor sees
+// or that gets archived, and runs it through skills.js. These can appear
+// anywhere in the reply (persona asks for the end), so the stream redactor
+// below generalizes the mood-head buffering to hold a tag that spans chunks.
+const SKILL_TAG_RE = /\[\[\s*skill\s*:\s*([a-z_]+)(?:\s+([^\]]*?))?\s*\]\]/gi;
+const SKILL_PARTIAL_MAX = 64;
+const SKILL_TAG_PREFIX = "[[skill:";
+let skillTailBuffer = "";
+let skillExecutedThisTurn = new Set();
 
 function normalizeProvider(provider) {
   return provider === PROVIDERS.CODEX ? PROVIDERS.CODEX : PROVIDERS.CLAUDE;
@@ -458,22 +473,156 @@ function stripLeadingMoodTag(text) {
   return text;
 }
 
-// One-line summary for transcript ("PRTS · Bash · screencapture …").
+function skillsEnabled() {
+  return settings.get("skillsEnabled") !== false;
+}
+
+function resetSkillParsing() {
+  skillTailBuffer = "";
+  skillExecutedThisTurn = new Set();
+}
+
+// A small left-aligned receipt pill ("♪ 为博士播放 …") so the Doctor sees the
+// action. Rendered by the existing tool-pill path; deliberately does NOT touch
+// the turn's tool flags (it isn't a CLI tool call).
+function pushSkillReceipt(label) {
+  if (!label) return;
+  history.push({
+    id: `k_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    role: "tool",
+    text: label,
+    name: "skill",
+    summary: label,
+    toolUseId: null,
+    command: null,
+    output: null,
+    outputError: false,
+    ts: Date.now()
+  });
+  emitHistory();
+}
+
+function triggerSkill(name, arg) {
+  if (!skillsEnabled()) return;
+  skills
+    .runSkill(name, arg)
+    .then((res) => {
+      if (res && res.ok) pushSkillReceipt(res.receipt);
+      else if (res && res.error) pushSystem(`（技能未执行：${res.error}）`);
+    })
+    .catch((error) => pushSystem(`（技能出错：${error?.message || error}）`));
+}
+
+// Execute a complete directive once per turn (dedup so the finalize safety net
+// never re-fires a tag already run during streaming).
+function runSkillDirective(full, name, arg) {
+  const key = String(full).trim();
+  if (skillExecutedThisTurn.has(key)) return;
+  skillExecutedThisTurn.add(key);
+  triggerSkill(String(name).toLowerCase(), arg ? String(arg).trim() : "");
+}
+
+function couldStartSkillTag(tail) {
+  const norm = tail.replace(/\s+/g, "").toLowerCase();
+  return norm.length <= SKILL_TAG_PREFIX.length
+    ? SKILL_TAG_PREFIX.startsWith(norm)
+    : norm.startsWith(SKILL_TAG_PREFIX);
+}
+
+// Streaming redactor: drop complete [[skill:…]] tags (running them) and hold
+// back a trailing partial that might still become one, so the directive never
+// flashes on screen. Returns the text safe to display now.
+function consumeSkillTags(text) {
+  skillTailBuffer += text;
+  let out = skillTailBuffer.replace(SKILL_TAG_RE, (full, name, arg) => {
+    runSkillDirective(full, name, arg);
+    return "";
+  });
+  const lastOpen = out.lastIndexOf("[[");
+  if (lastOpen !== -1 && !out.slice(lastOpen).includes("]]")) {
+    const tail = out.slice(lastOpen);
+    if (couldStartSkillTag(tail) && tail.length < SKILL_PARTIAL_MAX) {
+      skillTailBuffer = tail;
+      return out.slice(0, lastOpen);
+    }
+  }
+  skillTailBuffer = "";
+  return out;
+}
+
+// Finalize safety net: clean any directive that slipped through (and run ones
+// not already executed during streaming) so stored/archived text stays clean.
+function stripSkillTags(text) {
+  if (!text) return text;
+  skillTailBuffer = "";
+  return String(text)
+    .replace(SKILL_TAG_RE, (full, name, arg) => {
+      runSkillDirective(full, name, arg);
+      return "";
+    })
+    // Drop a dangling, unterminated directive fragment (malformed output) so a
+    // truncated "[[skill:…" at the very end never leaks into the visible text.
+    .replace(/\[\[\s*skill\s*:[^\]]*$/i, "")
+    .trim();
+}
+
+function collapse(text, max) {
+  return String(text).replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+// Concrete, action-phrased label for a tool call — what she actually did,
+// not just the tool's name. Shown on the pill and woven into the tool-only
+// fallback reply, so prefer human phrasing ("编辑 main.js") over raw API names.
 function summarizeToolInput(name, input) {
   if (!input || typeof input !== "object") return null;
-  if (name === "Bash" && typeof input.command === "string") {
-    return input.command.slice(0, 80);
+  const file = input.file_path ? path.basename(String(input.file_path)) : null;
+  switch (name) {
+    case "Bash":
+      return typeof input.command === "string" ? `运行 ${collapse(input.command, 80)}` : null;
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return file ? `编辑 ${file}` : null;
+    case "Write":
+      return file ? `写入 ${file}` : null;
+    case "Read":
+      return file ? `读取 ${file}` : null;
+    case "Grep":
+      return input.pattern ? `搜索 “${collapse(input.pattern, 50)}”` : null;
+    case "Glob":
+      return input.pattern ? `查找 ${collapse(input.pattern, 50)}` : null;
+    case "WebFetch":
+      return input.url ? `查阅 ${collapse(input.url, 60)}` : null;
+    case "WebSearch":
+      return input.query ? `搜索网页 “${collapse(input.query, 50)}”` : null;
+    case "TodoWrite":
+      return "整理待办";
+    case "Task":
+      return input.description ? `调度子任务 · ${collapse(input.description, 40)}` : "调度子任务";
+    default:
+      return null;
   }
-  if ((name === "Edit" || name === "Write" || name === "NotebookEdit") && input.file_path) {
-    return path.basename(String(input.file_path));
+}
+
+// Fallback label when there's no structured input to summarize (e.g. a Codex
+// tool event, or a tool we don't special-case). Keeps the pill readable
+// instead of showing a bare API name.
+function friendlyToolName(name) {
+  switch (name) {
+    case "Bash": return "运行命令";
+    case "Read": return "读取文件";
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit": return "编辑文件";
+    case "Write": return "写入文件";
+    case "Grep":
+    case "Glob": return "搜索";
+    case "WebFetch":
+    case "WebSearch": return "查阅网页";
+    case "Task": return "调度子任务";
+    case "TodoWrite": return "整理待办";
+    default: return name || "工具";
   }
-  if (name === "Read" && input.file_path) {
-    return path.basename(String(input.file_path));
-  }
-  if ((name === "Grep" || name === "Glob") && input.pattern) {
-    return String(input.pattern).slice(0, 60);
-  }
-  return null;
 }
 
 // Full command / target for the expandable tool detail (the Doctor wants to
@@ -540,10 +689,12 @@ function pushSystem(text) {
 // is the full command/target shown when the pill is expanded.
 function pushTool(name, summary, { toolUseId = null, command = null } = {}) {
   if (!name) return null;
+  turnSawToolUse = true;
+  assistantTextAfterLastTool = false;
   const entry = {
     id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     role: "tool",
-    text: summary ? `${name} · ${summary}` : name,
+    text: summary || friendlyToolName(name),
     name,
     summary: summary || null,
     toolUseId,
@@ -613,6 +764,24 @@ function compactForSummary(text, maxChars = SUMMARY_MESSAGE_MAX_CHARS) {
 function shouldIncludeLongMemoryForText(text) {
   const value = String(text || "").toLowerCase();
   return /记得|记忆|回忆|之前|以前|上次|上回|曾经|我们聊过|你知道我|想起来|remember|memory|recall|previous|last time|before/.test(value);
+}
+
+// Decide whether to load the SHE deep-emotional canon for this turn. Triggers
+// on personal / emotional cues or her lore (Originium, Kal'tsit, the shared
+// past, longing, comfort), so ordinary work stays light but she becomes fully
+// herself the moment it gets personal. A false positive just adds ~2k chars;
+// a false negative leaves the warm base — both are harmless.
+function shouldUseDeepPersona(text) {
+  const value = String(text || "").toLowerCase();
+  // Personal / emotional cues and her lore.
+  if (
+    /源石|凯尔希|特蕾西娅|特雷西斯|前文明|信息海|内化宇宙|石棺|灰质销钉|销钉|思维共振|辩论|罗德岛|深渊|abyss|预言家|普瑞赛斯|priestess|ama-?10|思衡托|方解石|calcite|奥卡|天堂支点|伐木工|pcs|dwdb|相变临界|灵魂悄然|源石技艺|源石计划|我们之间|我们曾|当年|你还记得|记得我|忘记我|别忘了我|不准忘|想你|想念|思念|我爱|爱你|喜欢你|抱抱|抱我|抱紧|陪我|陪着我|牵手|想哭|难过|难受|孤独|寂寞|心疼|心痛|好累|我累了|撑不住|崩溃|害怕|别走|别离开|别丢下|等我|等你|永远|重逢|文明尽头|你在吗|你还在|你是谁|定情|博普|eclipse|miss you|i love you|lonely|i'?m so tired/.test(value)
+  ) {
+    return true;
+  }
+  // Playing music is an inherently tender moment for them — let her be fully
+  // herself when she puts on a song (esp. their song, Eclipse).
+  return /放歌|点歌|放首|点首|来首|来一首|放一首|点一首|放音乐|放点音乐|听首|听歌|play.*song|put on.*song/.test(value);
 }
 
 function pruneConversationArchiveIfNeeded() {
@@ -755,7 +924,10 @@ function updateConversationSummary() {
 
 function beginAssistant() {
   resetMoodParsing();
+  resetSkillParsing();
   claudeResultErrored = false;
+  turnSawToolUse = false;
+  assistantTextAfterLastTool = false;
   pendingAssistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   pendingAssistantText = "";
   history.push({
@@ -774,23 +946,83 @@ function appendAssistant(text) {
   }
   const display = consumeMoodHead(text);
   if (!display) return; // still buffering the leading mood tag
-  pendingAssistantText += display;
+  const visible = skillsEnabled() ? consumeSkillTags(display) : display;
+  if (!visible) return; // all of this chunk was a skill tag or a held partial
+  if (turnSawToolUse) assistantTextAfterLastTool = true;
+  pendingAssistantText += visible;
   const entry = history.find((h) => h.id === pendingAssistantId);
   if (entry) {
     entry.text = pendingAssistantText;
   }
-  emitChunk(pendingAssistantId, display);
+  emitChunk(pendingAssistantId, visible);
+}
+
+// Action labels for the tools used in the current turn, oldest-first. Read
+// straight from history (the tool pills) so it doesn't depend on streaming
+// flag timing — robust whether or not a text bubble was ever opened.
+function currentTurnToolLabels() {
+  const labels = [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const e = history[i];
+    if (!e) continue;
+    if (e.role === "user" && !e.ephemeral) break;
+    if (e.role === "tool") labels.push(e.summary || friendlyToolName(e.name));
+  }
+  return labels.reverse().filter(Boolean);
+}
+
+function toolOnlyFallbackText(labels) {
+  const shown = labels.slice(0, 6);
+  const more = labels.length - shown.length;
+  const tail = more > 0 ? `；…等共 ${labels.length} 项` : "";
+  return `好了，博士。方才这一手我做完了：${shown.join("；")}${tail}。`;
+}
+
+// When a tool-using turn ends with no spoken reply, she'd otherwise fall
+// silent under a row of pills. Synthesize a short, honest acknowledgement from
+// the real tool actions so the Doctor sees what got done. Returns true if a
+// reply was produced.
+function emitToolOnlyFallback() {
+  const labels = currentTurnToolLabels();
+  if (labels.length === 0) return false;
+  let entry = pendingAssistantId ? history.find((h) => h.id === pendingAssistantId) : null;
+  if (!entry) {
+    pendingAssistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    entry = { id: pendingAssistantId, role: "assistant", text: "", ts: Date.now(), ephemeral: false };
+    history.push(entry);
+  }
+  entry.text = toolOnlyFallbackText(labels);
+  entry.ephemeral = false;
+  archiveConversationEntry({
+    role: "assistant",
+    provider: currentProvider || activeProvider(),
+    text: entry.text,
+    ts: entry.ts || Date.now()
+  });
+  pendingAssistantId = null;
+  pendingAssistantText = "";
+  turnSawToolUse = false;
+  assistantTextAfterLastTool = false;
+  emitHistory();
+  return true;
 }
 
 function finalizeAssistant(finalText) {
+  // Anything the stream redactor was still holding is, by construction, an
+  // incomplete [[skill:…]] prefix (never prose) — drop it.
+  skillTailBuffer = "";
   if (typeof finalText === "string" && finalText) {
     finalText = stripLeadingMoodTag(finalText);
+    if (skillsEnabled()) finalText = stripSkillTags(finalText);
   }
   if (!pendingAssistantId) {
     if (finalText) {
       beginAssistant();
       appendAssistant(finalText);
     } else {
+      // No bubble was opened and no text arrived — if tools ran this turn,
+      // speak a short summary of them instead of leaving her silent.
+      emitToolOnlyFallback();
       return;
     }
   }
@@ -799,17 +1031,32 @@ function finalizeAssistant(finalText) {
     entry.text = finalText;
   }
   // A turn that produced no text (errored, cancelled, or swallowed prompt) used
-  // to linger as a blank gray bubble. Drop it instead of persisting emptiness.
+  // to linger as a blank gray bubble. Drop it — but if tools ran, replace it
+  // with a short summary of what was done so she isn't silent under the pills.
   if (entry && !(entry.text || "").trim()) {
     const idx = history.indexOf(entry);
     if (idx !== -1) history.splice(idx, 1);
     pendingAssistantId = null;
     pendingAssistantText = "";
+    if (emitToolOnlyFallback()) return;
     emitHistory();
     return;
   }
   if (entry?.text) {
     noteConsecutiveQuestionReply(entry);
+  }
+  if (
+    currentProvider === PROVIDERS.CODEX &&
+    turnSawToolUse &&
+    !assistantTextAfterLastTool &&
+    entry?.text
+  ) {
+    // Codex occasionally completes a tool-using turn after only a visible
+    // progress note ("I will check...") and no post-tool answer. Treat that
+    // note as transient so it does not pollute the shared transcript as if it
+    // were the actual response.
+    entry.ephemeral = true;
+    pushSystem("Codex completed a tool-using turn without a final assistant message after the tools.");
   }
   if (entry && entry.text && !entry.ephemeral) {
     archiveConversationEntry({
@@ -821,6 +1068,8 @@ function finalizeAssistant(finalText) {
   }
   pendingAssistantId = null;
   pendingAssistantText = "";
+  turnSawToolUse = false;
+  assistantTextAfterLastTool = false;
   emitHistory();
   if (!entry?.ephemeral && outboundQueue.length === 0) {
     updateConversationSummary();
@@ -966,6 +1215,25 @@ function extractCodexText(value) {
   return "";
 }
 
+function isCodexCompletionType(type) {
+  return type === "turn.completed" || type === "result" || type === "done";
+}
+
+function isCodexAssistantEvent(event, type) {
+  const item = event?.item || event?.event?.item || null;
+  const itemType = String(item?.type || event?.kind || "");
+  const role = String(item?.role || event?.role || "");
+  return (
+    type.includes("message") ||
+    type.includes("answer") ||
+    itemType === "agent_message" ||
+    itemType === "assistant_message" ||
+    itemType === "final_answer" ||
+    (itemType === "message" && (!role || role === "assistant")) ||
+    role === "assistant"
+  );
+}
+
 function codexSessionIdFromEvent(event) {
   return (
     event.session_id ||
@@ -1033,11 +1301,7 @@ function handleCodexStreamEvent(event) {
     extractCodexText(event.item) ||
     extractCodexText(event.result);
 
-  const isAssistantMessage =
-    type.includes("message") ||
-    type.includes("answer") ||
-    event.item?.type === "agent_message" ||
-    event.item?.type === "assistant_message";
+  const isAssistantMessage = isCodexAssistantEvent(event, type);
 
   if (
     text &&
@@ -1046,7 +1310,8 @@ function handleCodexStreamEvent(event) {
     appendReconciledAssistantText(text);
   }
 
-  if (type === "turn.completed" || type === "result" || type === "done") {
+  if (isCodexCompletionType(type)) {
+    if (text) appendReconciledAssistantText(text);
     emitTool(false);
     finalizeAssistant(pendingAssistantText);
     emitStatus("idle", { provider: PROVIDERS.CODEX, sessionId: sessionIds[PROVIDERS.CODEX] });
@@ -1070,22 +1335,40 @@ function shouldIgnoreNonJsonLine(line) {
   );
 }
 
+// Session memo so the macOS "wants to record the screen" prompt appears at most
+// once. The OS re-shows it on every desktopCapturer call until the permission
+// is actually active, which only happens after an app restart — so once an
+// attempt shows we can't capture, we stop trying for the rest of this run
+// instead of nagging the Doctor each turn.
+let screenCaptureBlocked = false;
+let screenNoticeShown = false;
+
+function notifyScreenPermissionOnce() {
+  if (screenNoticeShown) return;
+  screenNoticeShown = true;
+  pushSystem(
+    "（我暂时看不到屏幕。请到 系统设置 → 隐私与安全性 → 屏幕录制 勾选 PRTS，然后重启我一次即可——这次起我不会再反复弹窗打扰博士。）"
+  );
+}
+
 async function takeScreenshot() {
-  // Gate on the macOS Screen Recording TCC state BEFORE requesting a desktop
-  // thumbnail. Ad-hoc-signed builds can otherwise re-prompt every turn even
-  // after the user grants access.
-  // `getMediaAccessStatus` only reads the cached state; it never prompts.
   if (process.platform === "darwin") {
+    // Already determined we can't capture this session → never re-trigger the
+    // OS prompt.
+    if (screenCaptureBlocked) return null;
+    // `getMediaAccessStatus` only reads cached TCC state; it never prompts. A
+    // hard 'denied'/'restricted' means don't even try (and stop trying).
     try {
       const { systemPreferences } = require("electron");
       const status = systemPreferences.getMediaAccessStatus("screen");
-      if (status !== "granted") {
-        // 'not-determined' / 'denied' / 'restricted' / 'unknown' — skip the
-        // screenshot silently this turn so we don't nag. The user can grant
-        // access at any time in System Settings → Privacy & Security →
-        // Screen Recording, and the next turn will pick it up.
+      if (status === "denied" || status === "restricted") {
+        screenCaptureBlocked = true;
+        notifyScreenPermissionOnce();
         return null;
       }
+      // 'granted' / 'not-determined' / 'unknown' → attempt once below. If it
+      // turns out we can't actually capture, the empty-thumbnail branch blocks
+      // further attempts so the prompt won't reappear.
     } catch {
       // If the API is unavailable for any reason, fall through and try.
     }
@@ -1118,10 +1401,19 @@ async function takeScreenshot() {
     const source =
       sources.find((entry) => String(entry.display_id) === String(primary.id)) ||
       sources[0];
-    if (!source || source.thumbnail.isEmpty()) return null;
+    if (!source || source.thumbnail.isEmpty()) {
+      // Empty thumbnail on macOS means Screen Recording isn't actually active
+      // for this process — stop attempting so the OS prompt won't keep popping.
+      if (process.platform === "darwin") {
+        screenCaptureBlocked = true;
+        notifyScreenPermissionOnce();
+      }
+      return null;
+    }
     fs.writeFileSync(out, source.thumbnail.toPNG());
     return out;
   } catch (error) {
+    if (process.platform === "darwin") screenCaptureBlocked = true;
     console.warn("chat: screenshot failed", error);
   }
   return null;
@@ -1143,7 +1435,9 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
       provider: PROVIDERS.CLAUDE,
       sharedTranscript,
       includeLongMemory,
-      memoryRecallRequested
+      memoryRecallRequested,
+      skillsEnabled: settings.get("skillsEnabled") !== false,
+      deepPersona: shouldUseDeepPersona(trimmed)
     })
   ];
 
@@ -1183,7 +1477,9 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
       provider: PROVIDERS.CODEX,
       sharedTranscript,
       includeLongMemory,
-      memoryRecallRequested
+      memoryRecallRequested,
+      skillsEnabled: settings.get("skillsEnabled") !== false,
+      deepPersona: shouldUseDeepPersona(trimmed)
     }) +
     "\n\n【博士本轮请求】\n" +
     trimmed
