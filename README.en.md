@@ -158,11 +158,6 @@ PRTS_SHOW_ON_START=1 ./priestess-arknights-*.AppImage
 
 > **GitHub Releases ships only AppImage and deb** — no `.tar.gz`, `.rpm`, or other formats.
 
-**Updates**
-
-Linux does not support silent self-install. Use the tray menu **Check for updates…**
-to be notified of new releases.
-
 **System requirements**
 
 - Linux x86_64, Wayland or X11 session

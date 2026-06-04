@@ -18,7 +18,6 @@ const settings = require("./settings");
 const chat = require("./chat");
 const persona = require("./persona");
 const platform = require("./platform");
-const updater = require("./updater");
 
 let conversationFile = null;
 let saveTimer = null;
@@ -747,7 +746,6 @@ function buildContextMenu() {
       label: "打开数据文件夹",
       click: () => shell.openPath(app.getPath("userData"))
     },
-    ...buildUpdateMenuItems(),
     { type: "separator" },
     {
       label: "退出",
@@ -755,21 +753,6 @@ function buildContextMenu() {
       click: () => app.quit()
     }
   ]);
-}
-
-// Update controls: a manual check plus, when something is waiting, an action
-// item (install now on Windows / open the download page on other platforms).
-function buildUpdateMenuItems() {
-  const pending = updater.getPendingUpdate();
-  const items = [{ label: "检查更新…", click: () => updater.checkNow() }];
-  if (pending) {
-    items.push(
-      pending.action === "install"
-        ? { label: `重启以更新 (v${pending.version})`, click: () => updater.installNow() }
-        : { label: `下载更新 (v${pending.version})…`, click: () => updater.openDownloadPage() }
-    );
-  }
-  return items;
 }
 
 function updateContextMenu() {
@@ -915,10 +898,6 @@ app.whenReady().then(() => {
 
   tray.on("click", () => togglePopover());
   updateContextMenu();
-
-  // Background update check (Windows self-updates; macOS notifies + opens the
-  // download page). No-op in dev / unpackaged builds.
-  updater.init();
 
   setTimeout(() => {
     chat.refreshProviderAvailability();

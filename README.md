@@ -121,11 +121,6 @@ priestess
 PRTS_SHOW_ON_START=1 ./priestess-arknights-*.AppImage
 ```
 
-**自动更新**
-
-Linux 版本目前需要手动下载更新。右下角托盘菜单有 **检查更新…** 选项，
-有新版本时会打开 GitHub Releases 页面供你下载。
-
 ### 从源码构建
 
 ```sh
@@ -270,7 +265,6 @@ Claude Code 和 Codex 都能读取同一份历史。
 | `src/main/persona-she.js` | 「她」视角的分层人格系统：定义普瑞赛斯的深层性格、中层行为、表层回应风格。 |
 | `src/main/chat.js` | 探测本地 Claude/Codex CLI，选择当前后端，启动子进程，解析流式输出，持久化 archive/summary，并在两个后端之间共享上下文。 |
 | `src/main/skills.js` | 技能系统：放音乐、搜索、打开网址/应用、设提醒、记一笔。 |
-| `src/main/updater.js` | 自动更新检查与后台下载。 |
 | `src/main/main.js` | Electron 主进程：托盘图标、右键菜单、后端菜单、设置持久化、聊天持久化、应用生命周期。 |
 | `src/main/settings.js` | 默认设置和 `settings.json` 持久化。 |
 | `src/main/preload.js` | Electron 主进程与 renderer 之间的安全 IPC 桥。 |
