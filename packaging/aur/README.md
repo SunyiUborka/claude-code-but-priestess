@@ -6,8 +6,7 @@
 packaging/aur/
 ├── PKGBUILD             # Arch 构建脚本
 ├── .SRCINFO             # AUR 元数据
-├── priestess.install    # 安装后钩子
-└── linux-compat.patch   # Linux 兼容性补丁（Wayland、托盘、汉化）
+└── priestess.install    # 安装后钩子
 ```
 
 ## 构建测试
@@ -24,8 +23,8 @@ AUR 仓库名：`priestess`（上传前请确认可用）
 ```bash
 # 初始化 AUR 仓库（仅首次）
 git init
-git add PKGBUILD .SRCINFO priestess.install linux-compat.patch
-git commit -m "priestess: init 0.5.1-1"
+git add PKGBUILD .SRCINFO priestess.install
+git commit -m "priestess: init 0.5.2-1"
 
 # 提交到 AUR
 git remote add aur ssh://aur@aur.archlinux.org/priestess.git
