@@ -1,6 +1,6 @@
 # priestess-arknights
 
-Language: [简体中文](README.md) | **English**
+Language: [简体中文](README.md) | **English** | [日本語](README.ja.md)
 
 <p align="center">
   <img src="assets/character/睁眼.png" alt="Priestess (普瑞赛斯)" width="220">
