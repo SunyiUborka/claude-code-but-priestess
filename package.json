@@ -1,6 +1,6 @@
 {
   "name": "priestess-arknights",
-  "version": "0.6.0",
+  "version": "0.6.5",
   "description": "A cross-platform tray companion that lets you chat with 普瑞赛斯, backed by local Claude Code or Codex CLI usage.",
   "main": "src/main/main.js",
   "private": true,

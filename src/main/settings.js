@@ -4,12 +4,19 @@ const { app } = require("electron");
 
 const DEFAULTS = Object.freeze({
   chatProvider: process.platform === "win32" ? "codex" : "claude",
+  // Optional model override per backend, passed to the CLI as `--model`. Empty
+  // string = let the CLI / account pick its default.
+  claudeModel: "",
+  codexModel: "",
   chatCwd: "",
   // Appearance: "system" follows the OS light/dark setting; "light"/"dark"
   // force a fixed appearance. Drives nativeTheme.themeSource, which in turn
   // flips the renderer's prefers-color-scheme palette and (on macOS) the
   // popover vibrancy material.
   theme: "system",
+  // Menu language: "system" follows the OS preferred language, "zh" forces
+  // Simplified Chinese, and "en" forces English.
+  menuLanguage: "system",
   agentMode: false,
   // Lets Priestess trigger curated local actions (play music, web search, open
   // a URL/app) via hidden [[skill:…]] directives. Closed whitelist + sanitized

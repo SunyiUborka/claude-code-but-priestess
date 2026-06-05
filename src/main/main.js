@@ -1,5 +1,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
+const { spawn } = require("node:child_process");
 const {
   app,
   BrowserWindow,
@@ -569,15 +571,129 @@ function collapsePopoverToDesktopPet() {
 // ============================================================
 //  Tray context menu — right-click for settings + quit.
 // ============================================================
+const MENU_TEXT = {
+  zh: {
+    openChat: "打开聊天",
+    appearance: "外观",
+    language: "语言",
+    languageSystem: "跟随系统",
+    languageZh: "简体中文",
+    languageEn: "English",
+    system: "跟随系统",
+    light: "浅色",
+    dark: "深色",
+    skills: "允许她使用技能（音乐 / 搜索 / 应用）",
+    agentMode: "Agent mode（完整屏幕控制）",
+    enableAgentTitle: "开启 agent mode？",
+    enableAgent: "开启 agent mode",
+    cancel: "取消",
+    usageNoCli: "使用后端：未找到本地 CLI",
+    usageBackend: "使用后端",
+    usageBackendOne: (provider) => `使用后端：${provider}`,
+    modelClaude: "模型（Claude）",
+    modelCodex: "模型（Codex）",
+    defaultClaude: "默认（CLI/账户）",
+    defaultCodex: "默认（CLI/config）",
+    opusAlias: "Opus（最新别名）",
+    sonnetAlias: "Sonnet（最新别名）",
+    haikuAlias: "Haiku（最新别名）",
+    currentCustom: (model) => `当前自定义：${model}`,
+    autoScreenshot: "每轮自动截图",
+    desktopPet: "闲置时显示桌宠",
+    showDesktopPet: "立即显示桌宠",
+    desktopPetSize: "桌宠尺寸",
+    sizeSmall: "小",
+    sizeMedium: "中",
+    sizeLarge: "大",
+    setChatDirectory: "设置聊天工作目录…",
+    chooseProjectFolder: "选择聊天使用的项目文件夹",
+    clearChatDirectory: "清除聊天工作目录",
+    restartPriestess: "重启普瑞赛斯",
+    revealDataFolder: "打开数据目录",
+    checkUpdates: "检查更新…",
+    downloadInstallUpdate: (version) => `下载并安装 v${version}…`,
+    restartUpdate: (version) => `重启并更新（v${version}）`,
+    downloadUpdate: (version) => `下载更新（v${version}）…`,
+    quit: "退出"
+  },
+  en: {
+    openChat: "Open Chat",
+    appearance: "Appearance",
+    language: "Language",
+    languageSystem: "System",
+    languageZh: "简体中文",
+    languageEn: "English",
+    system: "System",
+    light: "Light",
+    dark: "Dark",
+    skills: "Let her use skills (music · search · apps)",
+    agentMode: "Agent mode (full screen control)",
+    enableAgentTitle: "Enable agent mode?",
+    enableAgent: "Enable agent mode",
+    cancel: "Cancel",
+    usageNoCli: "Usage backend: no local CLI found",
+    usageBackend: "Usage backend",
+    usageBackendOne: (provider) => `Usage backend: ${provider}`,
+    modelClaude: "Model (Claude)",
+    modelCodex: "Model (Codex)",
+    defaultClaude: "Default (CLI/account)",
+    defaultCodex: "Default (CLI/config)",
+    opusAlias: "Opus (latest alias)",
+    sonnetAlias: "Sonnet (latest alias)",
+    haikuAlias: "Haiku (latest alias)",
+    currentCustom: (model) => `Current custom: ${model}`,
+    autoScreenshot: "Auto-screenshot each turn",
+    desktopPet: "Desktop pet while idle",
+    showDesktopPet: "Show desktop pet now",
+    desktopPetSize: "Desktop pet size",
+    sizeSmall: "Small",
+    sizeMedium: "Medium",
+    sizeLarge: "Large",
+    setChatDirectory: "Set chat directory…",
+    chooseProjectFolder: "Choose project folder for chat",
+    clearChatDirectory: "Clear chat directory",
+    restartPriestess: "Restart Priestess",
+    revealDataFolder: "Reveal data folder",
+    checkUpdates: "Check for updates…",
+    downloadInstallUpdate: (version) => `Download and install v${version}…`,
+    restartUpdate: (version) => `Restart to update (v${version})`,
+    downloadUpdate: (version) => `Download update (v${version})…`,
+    quit: "Quit"
+  }
+};
+
+function menuLanguage() {
+  const selected = String(settings.get("menuLanguage") || "system").toLowerCase();
+  if (selected === "zh" || selected === "en") return selected;
+  try {
+    const preferred = app.getPreferredSystemLanguages?.() || [];
+    if (preferred[0]) return /^zh\b/i.test(String(preferred[0])) ? "zh" : "en";
+  } catch {
+    /* ignore */
+  }
+  try {
+    return /^zh\b/i.test(String(app.getLocale() || "")) ? "zh" : "en";
+  } catch {
+    /* ignore */
+  }
+  return "en";
+}
+
+function mt(key, ...args) {
+  const dict = MENU_TEXT[menuLanguage()] || MENU_TEXT.en;
+  const value = dict[key] ?? MENU_TEXT.en[key] ?? key;
+  return typeof value === "function" ? value(...args) : value;
+}
+
 async function toggleAgentMode(nextValue) {
   if (nextValue) {
     const warning = platform.agentModeWarning();
     const result = await dialog.showMessageBox({
       type: "warning",
-      title: "开启代理模式？",
+      title: mt("enableAgentTitle"),
       message: warning.message,
       detail: warning.detail,
-      buttons: ["取消", "开启代理模式"],
+      buttons: [mt("cancel"), mt("enableAgent")],
       defaultId: 0,
       cancelId: 0
     });
@@ -592,6 +708,11 @@ function setTheme(value) {
   applyThemeSource();
 }
 
+function setMenuLanguage(value) {
+  const next = value === "zh" || value === "en" ? value : "system";
+  settings.set({ menuLanguage: next });
+}
+
 function buildSettingsState() {
   const providerAvailability = chat.getProviderAvailability({ refresh: false });
   return {
@@ -602,12 +723,12 @@ function buildSettingsState() {
 }
 
 function buildUsageBackendMenuItem() {
-  const availability = chat.refreshProviderAvailability();
+  const availability = chat.getProviderAvailability({ refresh: false });
   const available = availability.availableProviders;
 
   if (available.length === 0) {
     return {
-      label: "后端: 未检测到本地 CLI",
+      label: mt("usageNoCli"),
       enabled: false
     };
   }
@@ -615,13 +736,13 @@ function buildUsageBackendMenuItem() {
   if (available.length === 1) {
     const provider = availability.providers[available[0]];
     return {
-      label: `后端: ${provider.label}`,
+      label: mt("usageBackendOne", provider.label),
       enabled: false
     };
   }
 
   return {
-    label: "后端",
+    label: mt("usageBackend"),
     submenu: available.map((providerKey) => {
       const provider = availability.providers[providerKey];
       return {
@@ -634,11 +755,218 @@ function buildUsageBackendMenuItem() {
   };
 }
 
+// Model presets per backend, passed to the CLI as `--model` (empty = the CLI's
+// own default). Claude accepts aliases plus full names; Codex exposes the
+// current account-visible model catalog via `codex debug models`.
+const MODEL_PRESETS = {
+  claude: [
+    { labelKey: "defaultClaude", value: "" },
+    { labelKey: "opusAlias", value: "opus" },
+    { labelKey: "sonnetAlias", value: "sonnet" },
+    { labelKey: "haikuAlias", value: "haiku" },
+    { type: "separator" },
+    { label: "Opus 4.8", value: "claude-opus-4-8" },
+    { label: "Opus 4.7", value: "claude-opus-4-7" },
+    { label: "Opus 4.6", value: "claude-opus-4-6" },
+    { label: "Opus 4.5 (2025-11-01)", value: "claude-opus-4-5-20251101" },
+    { label: "Opus 4.1 (2025-08-05)", value: "claude-opus-4-1-20250805" },
+    { type: "separator" },
+    { label: "Sonnet 4.6", value: "claude-sonnet-4-6" },
+    { label: "Sonnet 4.5 (2025-09-29)", value: "claude-sonnet-4-5-20250929" },
+    { label: "Sonnet 4 (2025-05-14)", value: "claude-sonnet-4-20250514" },
+    { type: "separator" },
+    { label: "Haiku 4.5 (2025-10-01)", value: "claude-haiku-4-5-20251001" }
+  ],
+  codex: [
+    { labelKey: "defaultCodex", value: "" }
+  ]
+};
+
+let codexModelPresetCache = {
+  command: null,
+  ts: 0,
+  presets: null,
+  refreshing: false
+};
+
+function modelSettingKey(provider) {
+  return provider === "codex" ? "codexModel" : "claudeModel";
+}
+
+function parseCodexModelCatalog(stdout) {
+  const raw = String(stdout || "").trim();
+  const line = raw
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("{") && part.includes("\"models\""));
+  for (const candidate of [raw, line].filter(Boolean)) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (!Array.isArray(parsed.models)) continue;
+      const models = parsed.models
+        .filter((model) => model && model.visibility === "list" && model.slug)
+        .map((model) => ({
+          label: model.display_name || model.slug,
+          value: model.slug
+        }));
+      if (models.length) return models;
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return null;
+}
+
+function codexDefaultPreset() {
+  return { labelKey: "defaultCodex", value: "" };
+}
+
+function readCodexModelPresetsFromFile() {
+  try {
+    const file = path.join(os.homedir(), ".codex", "models_cache.json");
+    if (!fs.existsSync(file)) return null;
+    return parseCodexModelCatalog(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function setCodexModelPresetCache(command, presets) {
+  if (!presets || !presets.length) return null;
+  codexModelPresetCache = {
+    command,
+    ts: Date.now(),
+    presets: [codexDefaultPreset(), ...presets],
+    refreshing: false
+  };
+  return codexModelPresetCache.presets;
+}
+
+function refreshCodexModelPresetsInBackground(command) {
+  if (!command || codexModelPresetCache.refreshing) return;
+  codexModelPresetCache.refreshing = true;
+  let stdout = "";
+  let killed = false;
+  try {
+    const proc = spawn(command, ["debug", "models"], {
+      env: { ...process.env, NO_COLOR: "1" },
+      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const timer = setTimeout(() => {
+      killed = true;
+      try {
+        proc.kill();
+      } catch {
+        /* ignore */
+      }
+    }, 3500);
+    proc.stdout.on("data", (chunk) => {
+      if (stdout.length < 8 * 1024 * 1024) stdout += chunk.toString("utf8");
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      codexModelPresetCache.refreshing = false;
+      if (code !== 0 || killed) return;
+      setCodexModelPresetCache(command, parseCodexModelCatalog(stdout));
+    });
+    proc.on("error", () => {
+      clearTimeout(timer);
+      codexModelPresetCache.refreshing = false;
+    });
+  } catch {
+    codexModelPresetCache.refreshing = false;
+  }
+}
+
+function codexModelPresetsForMenu() {
+  const availability = chat.getProviderAvailability({ refresh: false });
+  const command = availability.providers.codex?.command;
+  if (!command) return null;
+  const now = Date.now();
+  if (
+    codexModelPresetCache.command === command &&
+    codexModelPresetCache.presets
+  ) {
+    if (now - codexModelPresetCache.ts > 5 * 60 * 1000) {
+      refreshCodexModelPresetsInBackground(command);
+    }
+    return codexModelPresetCache.presets;
+  }
+
+  const filePresets = setCodexModelPresetCache(command, readCodexModelPresetsFromFile());
+  refreshCodexModelPresetsInBackground(command);
+  return filePresets || MODEL_PRESETS.codex;
+}
+
+function modelPresetsForProvider(provider) {
+  if (provider === "codex") {
+    return codexModelPresetsForMenu();
+  }
+  return MODEL_PRESETS[provider] || null;
+}
+
+function includeCurrentModelPreset(presets, current) {
+  if (!current || presets.some((item) => item.value === current)) return presets;
+  return [
+    ...presets,
+    { type: "separator" },
+    { label: mt("currentCustom", current), value: current }
+  ];
+}
+
+function modelPresetLabel(preset) {
+  if (preset.labelKey) return mt(preset.labelKey);
+  return preset.label || preset.value || "";
+}
+
+function desktopPetSizeLabel(sizeKey) {
+  switch (sizeKey) {
+    case "small": return mt("sizeSmall");
+    case "large": return mt("sizeLarge");
+    case "medium":
+    default:
+      return mt("sizeMedium");
+  }
+}
+
+// A "Model" submenu for whichever backend is active. Returned as an array so it
+// can be spread into the menu (empty when no backend / presets are available).
+function buildModelMenuItems() {
+  const availability = chat.getProviderAvailability({ refresh: false });
+  const provider = availability.activeProvider;
+  const presets = provider && modelPresetsForProvider(provider);
+  if (!presets) return [];
+  const key = modelSettingKey(provider);
+  let current = String(settings.get(key) || "");
+  if (provider === "codex" && current && !presets.some((item) => item.value === current)) {
+    settings.set({ [key]: "" });
+    current = "";
+  }
+  const visiblePresets = includeCurrentModelPreset(presets, current);
+  const label = provider === "codex" ? mt("modelCodex") : mt("modelClaude");
+  return [
+    {
+      label,
+      submenu: visiblePresets.map((m) => (
+        m.type === "separator"
+          ? { type: "separator" }
+          : {
+              label: modelPresetLabel(m),
+              type: "radio",
+              checked: current === m.value,
+              click: () => settings.set({ [key]: m.value })
+            }
+      ))
+    }
+  ];
+}
+
 function buildContextMenu() {
   const all = settings.getAll();
   return Menu.buildFromTemplate([
     {
-      label: "打开对话",
+      label: mt("openChat"),
       click: () => {
         if (!popover) createPopover();
         if (!popover.isVisible()) {
@@ -650,22 +978,22 @@ function buildContextMenu() {
     },
     { type: "separator" },
     {
-      label: "外观",
+      label: mt("appearance"),
       submenu: [
         {
-          label: "系统",
+          label: mt("system"),
           type: "radio",
           checked: (all.theme || "system") === "system",
           click: () => setTheme("system")
         },
         {
-          label: "亮色",
+          label: mt("light"),
           type: "radio",
           checked: all.theme === "light",
           click: () => setTheme("light")
         },
         {
-          label: "暗色",
+          label: mt("dark"),
           type: "radio",
           checked: all.theme === "dark",
           click: () => setTheme("dark")
@@ -673,13 +1001,36 @@ function buildContextMenu() {
       ]
     },
     {
-      label: "允许她使用技能（音乐 · 搜索 · 应用）",
+      label: mt("language"),
+      submenu: [
+        {
+          label: mt("languageSystem"),
+          type: "radio",
+          checked: (all.menuLanguage || "system") === "system",
+          click: () => setMenuLanguage("system")
+        },
+        {
+          label: mt("languageZh"),
+          type: "radio",
+          checked: all.menuLanguage === "zh",
+          click: () => setMenuLanguage("zh")
+        },
+        {
+          label: mt("languageEn"),
+          type: "radio",
+          checked: all.menuLanguage === "en",
+          click: () => setMenuLanguage("en")
+        }
+      ]
+    },
+    {
+      label: mt("skills"),
       type: "checkbox",
       checked: all.skillsEnabled !== false,
       click: (item) => settings.set({ skillsEnabled: item.checked })
     },
     {
-      label: "代理模式（全屏控制）",
+      label: mt("agentMode"),
       type: "checkbox",
       checked: Boolean(all.agentMode),
       click: (item) => {
@@ -687,15 +1038,16 @@ function buildContextMenu() {
       }
     },
     buildUsageBackendMenuItem(),
+    ...buildModelMenuItems(),
     {
-      label: "每轮自动截图",
+      label: mt("autoScreenshot"),
       type: "checkbox",
       visible: Boolean(all.agentMode),
       checked: all.autoScreenshot !== false,
       click: (item) => settings.set({ autoScreenshot: item.checked })
     },
     {
-      label: "闲置时显示桌面宠物",
+      label: mt("desktopPet"),
       type: "checkbox",
       checked: all.desktopPet !== false,
       click: (item) => {
@@ -708,26 +1060,26 @@ function buildContextMenu() {
       }
     },
     {
-      label: "显示桌面宠物",
+      label: mt("showDesktopPet"),
       enabled: all.desktopPet !== false,
       click: () => showDesktopPet()
     },
     {
-      label: "桌面宠物大小",
+      label: mt("desktopPetSize"),
       enabled: all.desktopPet !== false,
       submenu: Object.keys(DESKTOP_PET_SIZES).map((sizeKey) => ({
-        label: sizeKey === "small" ? "小" : sizeKey === "medium" ? "中" : "大",
+        label: desktopPetSizeLabel(sizeKey),
         type: "radio",
         checked: (all.desktopPetSize || "medium") === sizeKey,
         click: () => setDesktopPetSize(sizeKey)
       }))
     },
     {
-      label: "设置聊天目录…",
+      label: mt("setChatDirectory"),
       click: async () => {
         const current = (all.chatCwd || "").trim();
         const result = await dialog.showOpenDialog({
-          title: "选择聊天工作目录",
+          title: mt("chooseProjectFolder"),
           defaultPath: current || app.getPath("home"),
           properties: ["openDirectory", "createDirectory"]
         });
@@ -737,22 +1089,32 @@ function buildContextMenu() {
       }
     },
     {
-      label: "清除聊天目录",
+      label: mt("clearChatDirectory"),
       enabled: Boolean((all.chatCwd || "").trim()),
       click: () => settings.set({ chatCwd: "" })
     },
     { type: "separator" },
     {
-      label: "打开数据文件夹",
+      label: mt("restartPriestess"),
+      click: () => restartApp()
+    },
+    {
+      label: mt("revealDataFolder"),
       click: () => shell.openPath(app.getPath("userData"))
     },
     { type: "separator" },
     {
-      label: "退出",
+      label: mt("quit"),
       accelerator: "CmdOrCtrl+Q",
       click: () => app.quit()
     }
   ]);
+}
+
+// Quit and relaunch.
+function restartApp() {
+  app.relaunch();
+  app.exit(0);
 }
 
 function updateContextMenu() {

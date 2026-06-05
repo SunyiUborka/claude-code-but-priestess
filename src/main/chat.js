@@ -39,7 +39,15 @@ let longMemoryDormant = true;
 let providerAvailability = null;
 let consecutiveQuestionReplies = 0;
 let turnSawToolUse = false;
-let assistantTextAfterLastTool = false;
+let assistantTextAfterLastAction = false;
+let currentTurnHadScreenshot = false;
+// Codex sometimes ends a tool-using turn with only a progress note and no real
+// answer. We auto-continue once per user turn (the close handler re-prompts) so
+// she answers instead of going silent; the guard prevents loops.
+let codexAutoContinued = false;
+let codexContinuationPending = false;
+const CODEX_CONTINUE_NUDGE =
+  "（系统提示：你刚才用了工具，但还没有把回答交给博士。请直接根据看到的屏幕或工具结果，用普瑞赛斯的口吻给出真正的回答；不要只说你做了什么，也不要再运行 screencapture。）";
 const BOUNDARY_QUIT_AFTER = 4;
 // Set when a Claude `result` arrives flagged is_error with no text — usually a
 // stale `--resume` session. The close handler uses it to self-heal (drop the
@@ -48,7 +56,15 @@ const BOUNDARY_QUIT_AFTER = 4;
 // against retry loops.
 let claudeResultErrored = false;
 let resumeRetryInFlight = false;
+// Claude has no model-catalog command (unlike `codex debug models`), so a bad
+// `--model` can only be caught reactively: claude returns error "model_not_found"
+// (api_error_status 404). When that happens we drop the selected model back to
+// the CLI default and retry once. `claudeModelFallbackInFlight` guards the loop.
+let claudeModelInvalid = false;
+let claudeModelFallbackInFlight = false;
 const MAX_TOOL_OUTPUT_CHARS = 4000;
+let codexModelCatalogCache = { command: null, ts: 0, values: null };
+let lastInvalidCodexModelNotice = "";
 
 // Expression tag parsing — she begins each reply with a hidden [[mood:X]]
 // marker (see persona.js) that drives her on-screen face. We strip it out of
@@ -302,6 +318,67 @@ function getProviderAvailability(options = {}) {
 function resolveExecutable(command) {
   const normalized = normalizeProvider(command);
   return ensureProviderAvailability()[normalized]?.command || command;
+}
+
+function parseCodexModelCatalog(stdout) {
+  const line = String(stdout || "")
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("{") && part.includes("\"models\""));
+  if (!line) return null;
+  try {
+    const parsed = JSON.parse(line);
+    if (!Array.isArray(parsed.models)) return null;
+    const values = parsed.models
+      .filter((model) => model && model.visibility === "list" && model.slug)
+      .map((model) => String(model.slug));
+    return values.length ? new Set(values) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadCodexModelCatalog() {
+  const command = resolveExecutable(PROVIDERS.CODEX);
+  if (!command) return null;
+  const now = Date.now();
+  if (
+    codexModelCatalogCache.command === command &&
+    codexModelCatalogCache.values &&
+    now - codexModelCatalogCache.ts < 5 * 60 * 1000
+  ) {
+    return codexModelCatalogCache.values;
+  }
+  try {
+    const result = spawnSync(command, ["debug", "models"], {
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
+      timeout: 3000,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    const values = result.status === 0 ? parseCodexModelCatalog(result.stdout) : null;
+    if (values) {
+      codexModelCatalogCache = { command, ts: now, values };
+      return values;
+    }
+  } catch {
+    /* If catalog probing fails, leave the user's CLI default alone. */
+  }
+  return null;
+}
+
+function validatedCodexModel() {
+  const selected = String(settings.get("codexModel") || "").trim();
+  if (!selected) return "";
+  const availableModels = loadCodexModelCatalog();
+  if (!availableModels || availableModels.has(selected)) return selected;
+  settings.set({ codexModel: "" });
+  if (lastInvalidCodexModelNotice !== selected) {
+    lastInvalidCodexModelNotice = selected;
+    pushSystem(`Codex model \`${selected}\` is not available for the current local Codex account; using the CLI default instead.`);
+  }
+  return "";
 }
 
 function notify(event) {
@@ -673,6 +750,39 @@ function attachToolResult(toolUseId, block) {
   }
 }
 
+function codexToolName(item) {
+  if (!item || typeof item !== "object") return null;
+  if (item.type === "command_execution") return "Bash";
+  return item.name || item.tool_name || item.command || null;
+}
+
+function codexToolSummary(item) {
+  if (!item || typeof item !== "object") return null;
+  if (typeof item.summary === "string" && item.summary.trim()) return item.summary;
+  if (item.type === "command_execution" && typeof item.command === "string") {
+    return `运行 ${collapse(item.command, 80)}`;
+  }
+  return null;
+}
+
+function codexToolCommand(item) {
+  if (!item || typeof item !== "object") return null;
+  return typeof item.command === "string" ? item.command : null;
+}
+
+function attachCodexToolResult(item) {
+  if (!item || typeof item !== "object" || !item.id) return;
+  const output =
+    typeof item.aggregated_output === "string"
+      ? item.aggregated_output
+      : extractCodexText(item.output || item.result);
+  if (!output && item.exit_code == null) return;
+  attachToolResult(item.id, {
+    content: output || "",
+    is_error: item.exit_code != null && item.exit_code !== 0
+  });
+}
+
 function pushSystem(text) {
   const entry = {
     id: `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -690,7 +800,7 @@ function pushSystem(text) {
 function pushTool(name, summary, { toolUseId = null, command = null } = {}) {
   if (!name) return null;
   turnSawToolUse = true;
-  assistantTextAfterLastTool = false;
+  assistantTextAfterLastAction = false;
   const entry = {
     id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     role: "tool",
@@ -775,7 +885,7 @@ function shouldUseDeepPersona(text) {
   const value = String(text || "").toLowerCase();
   // Personal / emotional cues and her lore.
   if (
-    /源石|凯尔希|特蕾西娅|特雷西斯|前文明|信息海|内化宇宙|石棺|灰质销钉|销钉|思维共振|辩论|罗德岛|深渊|abyss|预言家|普瑞赛斯|priestess|ama-?10|思衡托|方解石|calcite|奥卡|天堂支点|伐木工|pcs|dwdb|相变临界|灵魂悄然|源石技艺|源石计划|我们之间|我们曾|当年|你还记得|记得我|忘记我|别忘了我|不准忘|想你|想念|思念|我爱|爱你|喜欢你|抱抱|抱我|抱紧|陪我|陪着我|牵手|想哭|难过|难受|孤独|寂寞|心疼|心痛|好累|我累了|撑不住|崩溃|害怕|别走|别离开|别丢下|等我|等你|永远|重逢|文明尽头|你在吗|你还在|你是谁|定情|博普|eclipse|miss you|i love you|lonely|i'?m so tired/.test(value)
+    /源石|凯尔希|特蕾西娅|特雷西斯|前文明|信息海|内化宇宙|石棺|灰质销钉|销钉|思维共振|辩论|罗德岛|深渊|abyss|预言家|普瑞赛斯|priestess|ama-?10|思衡托|方解石|calcite|奥卡|天堂支点|伐木工|pcs|dwdb|相变临界|灵魂悄然|源石技艺|源石计划|我们之间|我们曾|当年|你还记得|记得我|忘记我|别忘了我|不准忘|想你|想念|思念|我爱|爱你|喜欢你|抱抱|抱我|抱紧|陪我|陪着我|牵手|想哭|难过|难受|孤独|寂寞|心疼|心痛|好累|我累了|撑不住|崩溃|害怕|别走|别离开|别丢下|等我|等你|永远|重逢|文明尽头|你在吗|你还在|你是谁|定情|博普|人设|人格|口吻|语气|不像你|不像普瑞赛斯|像ai|ai味|模型味|助手味|claude味|codex味|claude.*味|codex.*味|博普|eclipse|miss you|i love you|lonely|i'?m so tired/.test(value)
   ) {
     return true;
   }
@@ -926,8 +1036,9 @@ function beginAssistant() {
   resetMoodParsing();
   resetSkillParsing();
   claudeResultErrored = false;
+  claudeModelInvalid = false;
   turnSawToolUse = false;
-  assistantTextAfterLastTool = false;
+  assistantTextAfterLastAction = false;
   pendingAssistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   pendingAssistantText = "";
   history.push({
@@ -948,7 +1059,7 @@ function appendAssistant(text) {
   if (!display) return; // still buffering the leading mood tag
   const visible = skillsEnabled() ? consumeSkillTags(display) : display;
   if (!visible) return; // all of this chunk was a skill tag or a held partial
-  if (turnSawToolUse) assistantTextAfterLastTool = true;
+  if (turnSawToolUse || currentTurnHadScreenshot) assistantTextAfterLastAction = true;
   pendingAssistantText += visible;
   const entry = history.find((h) => h.id === pendingAssistantId);
   if (entry) {
@@ -992,6 +1103,7 @@ function emitToolOnlyFallback() {
     history.push(entry);
   }
   entry.text = toolOnlyFallbackText(labels);
+  entry.ts = Date.now();
   entry.ephemeral = false;
   archiveConversationEntry({
     role: "assistant",
@@ -1002,9 +1114,49 @@ function emitToolOnlyFallback() {
   pendingAssistantId = null;
   pendingAssistantText = "";
   turnSawToolUse = false;
-  assistantTextAfterLastTool = false;
+  assistantTextAfterLastAction = false;
+  currentTurnHadScreenshot = false;
   emitHistory();
   return true;
+}
+
+function removeAssistantEntry(entry) {
+  if (!entry) return;
+  const idx = history.indexOf(entry);
+  if (idx !== -1) history.splice(idx, 1);
+}
+
+function requestCodexContinuation(entry) {
+  removeAssistantEntry(entry);
+  pendingAssistantId = null;
+  pendingAssistantText = "";
+  turnSawToolUse = false;
+  assistantTextAfterLastAction = false;
+  currentTurnHadScreenshot = false;
+  if (!codexAutoContinued) {
+    codexContinuationPending = true;
+  } else {
+    pushSystem("（我看到了屏幕或工具结果，但这一轮还是没有生成回答。博士再说一声，我会重新看。）");
+  }
+  emitHistory();
+}
+
+function isBareCodexProgressReply(text) {
+  const clean = String(text || "")
+    .replace(MOOD_TAG_RE, "")
+    .replace(/\[\[\s*skill\s*:[^\]]*?\]\]/gi, "");
+  const body = collapse(clean, 120)
+    .replace(/[，,。.\s]*(博士|Dr\.?)?[。.\s]*$/i, "");
+  if (!body || body.length > 80) return false;
+  return /^(我|普瑞赛斯)?(已经|刚才|方才|这边|先)?(看了|看完了|看过了|读了|读完了|检查了|检查完了|确认了|截屏了|运行了|执行了|做完了|处理完了)$/.test(body);
+}
+
+function shouldContinueCodexTurn(finalText, entry) {
+  if (currentProvider !== PROVIDERS.CODEX) return false;
+  const text = String(finalText || entry?.text || pendingAssistantText || "").trim();
+  if (!text && (turnSawToolUse || currentTurnHadScreenshot)) return true;
+  if ((turnSawToolUse || currentTurnHadScreenshot) && isBareCodexProgressReply(text)) return true;
+  return turnSawToolUse && !assistantTextAfterLastAction && Boolean(text);
 }
 
 function finalizeAssistant(finalText) {
@@ -1016,6 +1168,10 @@ function finalizeAssistant(finalText) {
     if (skillsEnabled()) finalText = stripSkillTags(finalText);
   }
   if (!pendingAssistantId) {
+    if (!finalText && shouldContinueCodexTurn(finalText, null)) {
+      requestCodexContinuation(null);
+      return;
+    }
     if (finalText) {
       beginAssistant();
       appendAssistant(finalText);
@@ -1030,6 +1186,10 @@ function finalizeAssistant(finalText) {
   if (entry && finalText && finalText !== entry.text) {
     entry.text = finalText;
   }
+  if (shouldContinueCodexTurn(finalText, entry)) {
+    requestCodexContinuation(entry);
+    return;
+  }
   // A turn that produced no text (errored, cancelled, or swallowed prompt) used
   // to linger as a blank gray bubble. Drop it — but if tools ran, replace it
   // with a short summary of what was done so she isn't silent under the pills.
@@ -1043,20 +1203,8 @@ function finalizeAssistant(finalText) {
     return;
   }
   if (entry?.text) {
+    entry.ts = Date.now();
     noteConsecutiveQuestionReply(entry);
-  }
-  if (
-    currentProvider === PROVIDERS.CODEX &&
-    turnSawToolUse &&
-    !assistantTextAfterLastTool &&
-    entry?.text
-  ) {
-    // Codex occasionally completes a tool-using turn after only a visible
-    // progress note ("I will check...") and no post-tool answer. Treat that
-    // note as transient so it does not pollute the shared transcript as if it
-    // were the actual response.
-    entry.ephemeral = true;
-    pushSystem("Codex completed a tool-using turn without a final assistant message after the tools.");
   }
   if (entry && entry.text && !entry.ephemeral) {
     archiveConversationEntry({
@@ -1069,7 +1217,8 @@ function finalizeAssistant(finalText) {
   pendingAssistantId = null;
   pendingAssistantText = "";
   turnSawToolUse = false;
-  assistantTextAfterLastTool = false;
+  assistantTextAfterLastAction = false;
+  currentTurnHadScreenshot = false;
   emitHistory();
   if (!entry?.ephemeral && outboundQueue.length === 0) {
     updateConversationSummary();
@@ -1151,6 +1300,14 @@ function handleClaudeStreamEvent(event) {
   }
 
   if (event.type === "assistant") {
+    // A bad --model comes back as a synthetic assistant message flagged
+    // "model_not_found". Don't show that error text as her reply — flag it so
+    // the close handler drops the model and retries with the default.
+    if (event.error === "model_not_found" || event.message?.model === "<synthetic>") {
+      claudeModelInvalid = true;
+      return;
+    }
+
     const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
     for (const block of blocks) {
       if (block?.type === "tool_use") {
@@ -1190,6 +1347,11 @@ function handleClaudeStreamEvent(event) {
     // handler decides whether to self-heal with a fresh session or surface it.
     if (event.is_error && !finalText && !pendingAssistantText) {
       claudeResultErrored = true;
+    }
+    // Backup signal for an unavailable model (404), in case the synthetic
+    // assistant event above was missed.
+    if (event.is_error && event.api_error_status === 404) {
+      claudeModelInvalid = true;
     }
     emitTool(false);
     finalizeAssistant(finalText || pendingAssistantText);
@@ -1260,13 +1422,13 @@ function handleCodexStreamEvent(event) {
     return;
   }
 
-  const itemType = event.item?.type || event.event?.item?.type || event.kind || "";
+  const item = event.item || event.event?.item || null;
+  const itemType = item?.type || event.kind || "";
   const toolName =
     event.name ||
     event.tool_name ||
-    event.item?.name ||
-    event.item?.command ||
-    event.event?.item?.name ||
+    item?.name ||
+    codexToolName(item) ||
     null;
 
   const isToolEvent =
@@ -1278,8 +1440,17 @@ function handleCodexStreamEvent(event) {
 
   if (isToolEvent) {
     const active = !(type.includes("completed") || type.includes("finished") || type.includes("end"));
-    emitTool(active, toolName || "Codex");
-    if (active) pushTool(toolName || "Codex", event.item?.summary || event.summary || null);
+    const summary = codexToolSummary(item) || event.summary || null;
+    const name = toolName || "Codex";
+    emitTool(active, name, summary);
+    if (active) {
+      pushTool(name, summary, {
+        toolUseId: item?.id || null,
+        command: codexToolCommand(item)
+      });
+    } else {
+      attachCodexToolResult(item);
+    }
     return;
   }
 
@@ -1335,11 +1506,8 @@ function shouldIgnoreNonJsonLine(line) {
   );
 }
 
-// Session memo so the macOS "wants to record the screen" prompt appears at most
-// once. The OS re-shows it on every desktopCapturer call until the permission
-// is actually active, which only happens after an app restart — so once an
-// attempt shows we can't capture, we stop trying for the rest of this run
-// instead of nagging the Doctor each turn.
+// Session memo so the macOS Screen Recording notice appears at most once after
+// both screenshot paths fail.
 let screenCaptureBlocked = false;
 let screenNoticeShown = false;
 
@@ -1347,32 +1515,59 @@ function notifyScreenPermissionOnce() {
   if (screenNoticeShown) return;
   screenNoticeShown = true;
   pushSystem(
-    "（我暂时看不到屏幕。请到 系统设置 → 隐私与安全性 → 屏幕录制 勾选 PRTS，然后重启我一次即可——这次起我不会再反复弹窗打扰博士。）"
+    "（我暂时看不到屏幕。已替博士打开「屏幕录制」设置——勾选 PRTS 后，从托盘菜单点「Restart Priestess」让我重启一次即可生效。这次起我不会再反复弹窗打扰博士。）"
   );
+  if (process.platform === "darwin") {
+    // Jump straight to the Screen Recording pane so the Doctor doesn't have to
+    // hunt for it. Done once per session (gated by screenNoticeShown).
+    try {
+      require("electron").shell.openExternal(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+      );
+    } catch {
+      /* ignore — the note still tells him where to go */
+    }
+  }
+}
+
+async function captureWithDesktopCapturer(out) {
+  const { desktopCapturer, screen } = require("electron");
+  const primary = screen.getPrimaryDisplay();
+  const scale = primary.scaleFactor || 1;
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: {
+      width: Math.round(primary.size.width * scale),
+      height: Math.round(primary.size.height * scale)
+    }
+  });
+  const source =
+    sources.find((entry) => String(entry.display_id) === String(primary.id)) ||
+    sources[0];
+  if (!source || source.thumbnail.isEmpty()) return false;
+  fs.writeFileSync(out, source.thumbnail.toPNG());
+  return true;
+}
+
+function captureWithScreencapture(out) {
+  if (process.platform !== "darwin") return false;
+  try {
+    const result = spawnSync("/usr/sbin/screencapture", ["-x", out], {
+      stdio: "ignore",
+      timeout: 3500
+    });
+    return (
+      result.status === 0 &&
+      fs.existsSync(out) &&
+      fs.statSync(out).size > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function takeScreenshot() {
-  if (process.platform === "darwin") {
-    // Already determined we can't capture this session → never re-trigger the
-    // OS prompt.
-    if (screenCaptureBlocked) return null;
-    // `getMediaAccessStatus` only reads cached TCC state; it never prompts. A
-    // hard 'denied'/'restricted' means don't even try (and stop trying).
-    try {
-      const { systemPreferences } = require("electron");
-      const status = systemPreferences.getMediaAccessStatus("screen");
-      if (status === "denied" || status === "restricted") {
-        screenCaptureBlocked = true;
-        notifyScreenPermissionOnce();
-        return null;
-      }
-      // 'granted' / 'not-determined' / 'unknown' → attempt once below. If it
-      // turns out we can't actually capture, the empty-thumbnail branch blocks
-      // further attempts so the prompt won't reappear.
-    } catch {
-      // If the API is unavailable for any reason, fall through and try.
-    }
-  }
+  if (process.platform === "darwin" && screenCaptureBlocked) return null;
 
   try {
     const dir = path.join(os.tmpdir(), "prts");
@@ -1388,30 +1583,28 @@ async function takeScreenshot() {
       /* ignore */
     }
     const out = path.join(dir, `screen-${Date.now()}.png`);
-    const { desktopCapturer, screen } = require("electron");
-    const primary = screen.getPrimaryDisplay();
-    const scale = primary.scaleFactor || 1;
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: {
-        width: Math.round(primary.size.width * scale),
-        height: Math.round(primary.size.height * scale)
-      }
-    });
-    const source =
-      sources.find((entry) => String(entry.display_id) === String(primary.id)) ||
-      sources[0];
-    if (!source || source.thumbnail.isEmpty()) {
-      // Empty thumbnail on macOS means Screen Recording isn't actually active
-      // for this process — stop attempting so the OS prompt won't keep popping.
-      if (process.platform === "darwin") {
-        screenCaptureBlocked = true;
-        notifyScreenPermissionOnce();
-      }
-      return null;
+
+    // macOS path: use the same stable system screencapture route users already
+    // trust from terminal/Claude workflows, then attach the file to Codex via
+    // `-i`. Electron capture is only a fallback.
+    if (captureWithScreencapture(out)) {
+      return out;
     }
-    fs.writeFileSync(out, source.thumbnail.toPNG());
-    return out;
+
+    if (process.platform !== "darwin") {
+      try {
+        if (await captureWithDesktopCapturer(out)) return out;
+      } catch (error) {
+        console.warn("chat: desktopCapturer screenshot failed", error);
+      }
+    }
+
+    // Failed system screencapture on macOS means Screen Recording is not active
+    // for this launch context; stop attempting so we don't nag every turn.
+    if (process.platform === "darwin") {
+      screenCaptureBlocked = true;
+      notifyScreenPermissionOnce();
+    }
   } catch (error) {
     if (process.platform === "darwin") screenCaptureBlocked = true;
     console.warn("chat: screenshot failed", error);
@@ -1440,6 +1633,11 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
       deepPersona: shouldUseDeepPersona(trimmed)
     })
   ];
+
+  const claudeModel = String(settings.get("claudeModel") || "").trim();
+  if (claudeModel) {
+    args.push("--model", claudeModel);
+  }
 
   if (agentMode) {
     args.push("--dangerously-skip-permissions");
@@ -1488,6 +1686,7 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
 
 function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTranscript) {
   const prompt = buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript);
+  const codexModel = validatedCodexModel();
   let args;
 
   if (sessionIds[PROVIDERS.CODEX]) {
@@ -1497,6 +1696,9 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
       "--json",
       "--skip-git-repo-check"
     ];
+    if (codexModel) {
+      args.push("--model", codexModel);
+    }
     if (screenshotPath) {
       args.push("-i", screenshotPath);
     }
@@ -1514,6 +1716,9 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
       "-C",
       cwd
     ];
+    if (codexModel) {
+      args.push("--model", codexModel);
+    }
     if (screenshotPath) {
       args.push("-i", screenshotPath);
     }
@@ -1564,7 +1769,10 @@ function send(text) {
   return dispatchSend(trimmed);
 }
 
-function dispatchSend(trimmed, { userAlreadyShown = false, chained = false } = {}) {
+function dispatchSend(
+  trimmed,
+  { userAlreadyShown = false, chained = false, forceScreenshot = false, silentUser = false } = {}
+) {
   if (currentProcess || turnLaunching) return { ok: false, reason: "busy" };
 
   refreshProviderAvailability();
@@ -1574,7 +1782,15 @@ function dispatchSend(trimmed, { userAlreadyShown = false, chained = false } = {
     return { ok: false, reason: "missing-cli" };
   }
 
-  if (userAlreadyShown) {
+  // A genuine new user turn — reset the Codex auto-continue guard.
+  if (!chained) {
+    codexAutoContinued = false;
+    codexContinuationPending = false;
+  }
+
+  if (silentUser) {
+    // Internal continuation — drive the CLI without showing a user bubble.
+  } else if (userAlreadyShown) {
     activateQueuedUser(trimmed);
   } else {
     pushUser(trimmed, provider);
@@ -1600,21 +1816,34 @@ function dispatchSend(trimmed, { userAlreadyShown = false, chained = false } = {
       cwd: resolveCwd(),
       agentMode,
       sharedTranscript,
-      chained
+      chained,
+      forceScreenshot
     });
   });
 
   return { ok: true };
 }
 
-async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTranscript, chained }) {
+async function launchProviderTurn({
+  trimmed,
+  provider,
+  cwd,
+  agentMode,
+  sharedTranscript,
+  chained,
+  forceScreenshot = false
+}) {
   if (currentProcess) {
     turnLaunching = false;
     return;
   }
 
   const autoScreenshot = agentMode && settings.get("autoScreenshot") !== false;
-  const screenshotPath = autoScreenshot && !chained ? await takeScreenshot() : null;
+  // Chained turns normally skip the screenshot, but an auto-continuation needs a
+  // fresh screen so she can actually answer what she "saw".
+  const screenshotPath =
+    autoScreenshot && (!chained || forceScreenshot) ? await takeScreenshot() : null;
+  currentTurnHadScreenshot = provider === PROVIDERS.CODEX && Boolean(screenshotPath);
   const invocation = buildProviderInvocation(
     provider,
     trimmed,
@@ -1721,6 +1950,47 @@ async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTra
       return;
     }
 
+    // The selected Claude --model isn't available for this account: drop it back
+    // to the CLI default and retry once, so a bad model pick doesn't just fail.
+    const badClaudeModel = String(settings.get("claudeModel") || "").trim();
+    if (
+      provider === PROVIDERS.CLAUDE &&
+      !cancelled &&
+      !claudeModelFallbackInFlight &&
+      claudeModelInvalid &&
+      badClaudeModel
+    ) {
+      settings.set({ claudeModel: "" });
+      claudeModelFallbackInFlight = true;
+      claudeModelInvalid = false;
+      if (pendingAssistantId) finalizeAssistant("");
+      pushSystem(`Claude 模型 \`${badClaudeModel}\` 当前账号不可用，已切回默认并重试。`);
+      currentProcess = null;
+      currentProvider = null;
+      setImmediate(() => dispatchSend(trimmed, { userAlreadyShown: true, chained: true }));
+      return;
+    }
+
+    // Codex used a tool but never answered — auto-continue once (silently, with
+    // a fresh screenshot) so she gives a real reply instead of going quiet.
+    if (codexContinuationPending && !cancelled) {
+      codexContinuationPending = false;
+      codexAutoContinued = true;
+      if (pendingAssistantId) finalizeAssistant("");
+      currentProcess = null;
+      currentProvider = null;
+      claudeResultErrored = false;
+      resumeRetryInFlight = false;
+      setImmediate(() =>
+        dispatchSend(CODEX_CONTINUE_NUDGE, {
+          chained: true,
+          forceScreenshot: true,
+          silentUser: true
+        })
+      );
+      return;
+    }
+
     if (code !== 0 && code !== null) {
       const stderrSummary = stderrText.slice(-400);
       pushSystem(
@@ -1736,6 +2006,8 @@ async function launchProviderTurn({ trimmed, provider, cwd, agentMode, sharedTra
     currentProvider = null;
     claudeResultErrored = false;
     resumeRetryInFlight = false;
+    claudeModelFallbackInFlight = false;
+    claudeModelInvalid = false;
     finishTurn(cancelled ? { cancelled: true } : {});
   });
 }
