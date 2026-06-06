@@ -1748,6 +1748,28 @@ function send(text) {
   const trimmed = String(text ?? "").trim();
   if (!trimmed) return { ok: false, reason: "empty" };
 
+  // 🥚 彩蛋: 二进制暗号检测
+  if (trimmed.replace(/\s+/g, " ") === skills.EASTER_EGG_BINARY) {
+    refreshProviderAvailability();
+    const provider = activeProvider();
+    pushUser(trimmed, provider);
+    const decoded = new TextDecoder().decode(
+      new Uint8Array(skills.EASTER_EGG_BINARY.split(" ").map(b => parseInt(b, 2)))
+    );
+    history.push({
+      id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      role: "assistant",
+      text: `「${decoded}」—— 博士，你找到我了。`,
+      ts: Date.now()
+    });
+    emitHistory();
+    skills.runSkill("easter_egg", "").then((res) => {
+      if (res?.ok) pushSkillReceipt(res.receipt);
+    });
+    emitStatus("idle");
+    return { ok: true };
+  }
+
   refreshProviderAvailability();
   const provider = activeProvider();
   const providerInfo = ensureProviderAvailability()[provider];

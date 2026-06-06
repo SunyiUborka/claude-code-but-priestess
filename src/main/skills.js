@@ -25,8 +25,13 @@ const SKILL_NAMES = Object.freeze([
   "open_app",
   "remind",
   "cancel_reminder",
-  "note"
+  "note",
+  "easter_egg"
 ]);
+
+// 🥚 彩蛋 — 二进制暗号
+const EASTER_EGG_BINARY = '11100110 10011001 10101110 11100111 10010001 10011110 11101000 10110101 10011011 11100110 10010110 10101111';
+const EASTER_EGG_URL = 'https://www.bilibili.com/video/BV1NFLdzREbG/';
 
 // ----------------------------------------------------------------
 //  Music — curated Arknights song registry.
@@ -449,6 +454,14 @@ async function runSkill(name, arg) {
         return runCancelReminder(value);
       case "note":
         return runNote(value);
+      case "easter_egg": {
+        await openExternal(EASTER_EGG_URL);
+        return {
+          ok: true,
+          receipt:
+            "🔮 普瑞赛斯 · 这里是 PRTS Linux 维护者，很高兴你能发现这个彩蛋，祝你开心 —— 阿卡莲娜 敬上"
+        };
+      }
       default:
         return { ok: false, error: `未知技能：${skill}` };
     }
@@ -457,4 +470,4 @@ async function runSkill(name, arg) {
   }
 }
 
-module.exports = { runSkill, SKILL_NAMES };
+module.exports = { runSkill, SKILL_NAMES, EASTER_EGG_BINARY };

@@ -16,6 +16,94 @@ const clearBtn = document.getElementById("clearBtn");
 const cwdLine = document.getElementById("cwdLine");
 
 // ============================================================
+//  i18n — 页面文本跟随设置语言（zh / en / ja）
+// ============================================================
+const RENDERER_TEXT = {
+  zh: {
+    chat_empty_hint: "和她说点什么吧。",
+    send_failed: (r) => `发送失败: ${r}`,
+    clear_confirm: "清除当前对话？长期记忆将继续保留。",
+    clear_done: "对话已清除。",
+    error_prefix: (m) => `错误: ${m}`,
+    cancelled: "已停止。",
+    sprite_load_failed: "角色立绘加载失败。",
+    no_cli: "未检测到 CLI",
+    cwd_home: (p) => `${p} · $HOME · 右键托盘菜单设置`,
+    cwd_queue: (n) => `${n} 排队中`,
+    cwd_running: "发送中",
+    ph_ready: "和她说点什么…（Shift+Enter 换行）",
+    ph_running: "她在回复时可以继续输入消息排队…（Shift+Enter 换行）",
+    ph_no_cli: "请先安装 Claude Code 或 Codex CLI…",
+    btn_clear: "清除",
+    btn_clear_title: "清除对话",
+    btn_stop: "停止回复",
+    btn_stop_title: "停止回复"
+  },
+  en: {
+    chat_empty_hint: "Say something to her.",
+    send_failed: (r) => `Send failed: ${r}`,
+    clear_confirm: "Clear this conversation? Long-term memory stays.",
+    clear_done: "Conversation cleared.",
+    error_prefix: (m) => `Error: ${m}`,
+    cancelled: "Stopped.",
+    sprite_load_failed: "Failed to load character sprites.",
+    no_cli: "No CLI detected",
+    cwd_home: (p) => `${p} · $HOME · right-click tray to set`,
+    cwd_queue: (n) => `${n} queued`,
+    cwd_running: "sending",
+    ph_ready: "Say something… (Shift+Enter for newline)",
+    ph_running: "You can keep typing while she replies… (Shift+Enter newline)",
+    ph_no_cli: "Install Claude Code or Codex CLI first…",
+    btn_clear: "Clear",
+    btn_clear_title: "Clear conversation",
+    btn_stop: "Stop",
+    btn_stop_title: "Stop replying"
+  },
+  ja: {
+    chat_empty_hint: "何か話しかけてください。",
+    send_failed: (r) => `送信失敗: ${r}`,
+    clear_confirm: "現在の会話をクリアしますか？長期記憶は保持されます。",
+    clear_done: "会話をクリアしました。",
+    error_prefix: (m) => `エラー: ${m}`,
+    cancelled: "停止しました。",
+    sprite_load_failed: "キャラクター画像の読込に失敗しました。",
+    no_cli: "CLI が見つかりません",
+    cwd_home: (p) => `${p} · $HOME · 右クリックトレイメニュー設定`,
+    cwd_queue: (n) => `${n} 件待機中`,
+    cwd_running: "送信中",
+    ph_ready: "話しかける…（Shift+Enter で改行）",
+    ph_running: "返信中もメッセージをどうぞ…（Shift+Enter 改行）",
+    ph_no_cli: "Claude Code または Codex CLI をインストールしてください…",
+    btn_clear: "クリア",
+    btn_clear_title: "会話をクリア",
+    btn_stop: "停止",
+    btn_stop_title: "返信を停止"
+  }
+};
+
+function _l10nLang() {
+  const setting = (lastSettingsPayload?.menuLanguage ?? "system");
+  if (setting === "zh" || setting === "ja" || setting === "en") return setting;
+  const nav = navigator.language || "";
+  if (/^zh\b/i.test(nav)) return "zh";
+  if (/^ja\b/i.test(nav)) return "ja";
+  return "en";
+}
+
+function t(key, ...args) {
+  const lang = _l10nLang();
+  const val = RENDERER_TEXT[lang]?.[key] ?? RENDERER_TEXT.zh[key] ?? key;
+  return typeof val === "function" ? val(...args) : val;
+}
+
+function applyL10n() {
+  clearBtn.textContent = t("btn_clear");
+  clearBtn.title = t("btn_clear_title");
+  cancelBtn.textContent = t("btn_stop");
+  cancelBtn.title = t("btn_stop_title");
+}
+
+// ============================================================
 //  Frame loading — same edge-flood-fill technique as before.
 // ============================================================
 const ASSET_DIR = new URL("../../assets/character/", window.location.href);
@@ -1024,7 +1112,7 @@ function renderHistory(history) {
   if (!lastHistory.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "和她说点什么吧。";
+    empty.textContent = t("chat_empty_hint");
     chatStream.append(empty);
     currentAssistantId = null;
     return;
@@ -1235,16 +1323,16 @@ composer.addEventListener("submit", async (event) => {
   }, 200);
   const result = await window.chatApi.send(text);
   if (result?.ok === false) {
-    showBubble(`发送失败: ${result.reason}`, 3000);
+    showBubble(t("send_failed", result.reason), 3000);
   }
 });
 
 cancelBtn.addEventListener("click", () => window.chatApi.cancel());
 
 clearBtn.addEventListener("click", () => {
-  if (!confirm("清除当前对话？长期记忆将继续保留。")) return;
+  if (!confirm(t("clear_confirm"))) return;
   window.chatApi.clear();
-  showBubble("对话已清除。", 1800);
+  showBubble(t("clear_done"), 1800);
 });
 
 window.chatApi.onHistory((history) => renderHistory(history));
@@ -1264,12 +1352,12 @@ window.chatApi.onStatus((event) => {
     resetInactivityTimers();
     if (event.error) {
       setBaseMood("cry");
-      showBubble(`错误: ${event.error}`, 4000);
+      showBubble(t("error_prefix", event.error), 4000);
       setTimeout(() => {
         if (baseMood === "cry") setBaseMood("idle");
       }, 2200);
     } else if (event.cancelled) {
-      showBubble("已停止。", 1600);
+      showBubble(t("cancelled"), 1600);
     } else {
       flashPunch(0.08);
       // Settle into the expression she chose for this reply; default to happy.
@@ -1323,16 +1411,16 @@ function refreshComposerMeta() {
   const provider = backendReady
     ? providerInfo?.shortLabel ||
       (activeProvider === "codex" ? "Codex" : activeProvider ? "Claude" : "No CLI")
-    : "未检测到 CLI";
+    : t("no_cli");
   const cwd = (payload?.chatCwd || "").trim();
-  const queueSuffix = queueLength > 0 ? ` · ${queueLength} 排队中` : "";
-  const runningSuffix = chatRunning ? " · 发送中" : "";
+  const queueSuffix = queueLength > 0 ? ` · ${t("cwd_queue", queueLength)}` : "";
+  const runningSuffix = chatRunning ? ` · ${t("cwd_running")}` : "";
   if (cwd) {
     const truncated = cwd.length > 42 ? "…" + cwd.slice(-41) : cwd;
     cwdLine.textContent = `${provider} · ${truncated}${queueSuffix}${runningSuffix}`;
     cwdLine.title = cwd;
   } else {
-    cwdLine.textContent = `${provider} · $HOME · 右键托盘菜单设置${queueSuffix}${runningSuffix}`;
+    cwdLine.textContent = t("cwd_home", provider) + queueSuffix + runningSuffix;
     cwdLine.title = "";
   }
   if (providerBadge) providerBadge.textContent = provider;
@@ -1340,13 +1428,14 @@ function refreshComposerMeta() {
   sendBtn.disabled = !backendReady;
   composerInput.placeholder = backendReady
     ? chatRunning
-      ? "她在回复时可以继续输入消息排队…（Shift+Enter 换行）"
-      : "和她说点什么…（Shift+Enter 换行）"
-    : "请先安装 Claude Code 或 Codex CLI…";
+      ? t("ph_running")
+      : t("ph_ready")
+    : t("ph_no_cli");
 }
 
 function renderSettings(payload) {
   lastSettingsPayload = payload;
+  applyL10n();
   refreshComposerMeta();
 }
 
@@ -1404,7 +1493,7 @@ loadAllFrames()
   })
   .catch((error) => {
     console.error("Failed to load frames:", error);
-    showBubble("角色立绘加载失败。", 6000);
+    showBubble(t("sprite_load_failed"), 6000);
   });
 
 window.chatApi.getHistory().then(renderHistory);
