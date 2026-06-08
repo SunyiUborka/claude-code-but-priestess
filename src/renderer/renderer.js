@@ -983,6 +983,7 @@ function renderMarkdown(input) {
     codeBlocks.push({ lang: lang.toLowerCase(), code });
     return `\fCB${codeBlocks.length - 1}\f`;
   });
+
   // Pull out block elements (lists, blockquotes) into placeholders before the
   // newline -> <br> flattening, rendering their contents with inlineMd.
   const htmlBlocks = [];
@@ -998,6 +999,7 @@ function renderMarkdown(input) {
   src = src.replace(/(?:^[ \t]*>[ \t]?.*(?:\n|$))+/gm, (block) =>
     `\n${stash(`<blockquote>${block.trimEnd().split("\n")
       .map((l) => inlineMd(l.replace(/^[ \t]*>[ \t]?/, ""))).join("<br>")}</blockquote>`)}\n`);
+
   src = escapeHtml(src);
   // Inline code
   src = src.replace(/`([^`\n]+?)`/g, (_, code) => `<code>${code}</code>`);
