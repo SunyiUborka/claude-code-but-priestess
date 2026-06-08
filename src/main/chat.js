@@ -320,6 +320,30 @@ function resolveExecutable(command) {
   return ensureProviderAvailability()[normalized]?.command || command;
 }
 
+function createInvocationTempFile(prefix, filename, text) {
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    const file = path.join(dir, filename);
+    fs.writeFileSync(file, String(text || ""), "utf8");
+    return { dir, file };
+  } catch (error) {
+    console.warn("chat: failed to create invocation temp file", error);
+    return null;
+  }
+}
+
+function cleanupInvocation(invocation) {
+  if (!invocation || invocation.cleanedUp) return;
+  invocation.cleanedUp = true;
+  for (const dir of invocation.cleanupDirs || []) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn("chat: failed to clean invocation temp dir", error);
+    }
+  }
+}
+
 function parseCodexModelCatalog(stdout) {
   const line = String(stdout || "")
     .split(/\r?\n/)
@@ -1615,24 +1639,31 @@ async function takeScreenshot() {
 function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscript) {
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
+  const systemPrompt = persona.buildPersonaPrompt({
+    agentMode,
+    screenshotPath,
+    provider: PROVIDERS.CLAUDE,
+    sharedTranscript,
+    includeLongMemory,
+    memoryRecallRequested,
+    skillsEnabled: settings.get("skillsEnabled") !== false,
+    deepPersona: shouldUseDeepPersona(trimmed)
+  });
+  const promptFile = createInvocationTempFile("prts-claude-", "system-prompt.txt", systemPrompt);
   const args = [
     "-p",
     "--output-format",
     "stream-json",
+    "--input-format",
+    "text",
     "--verbose",
-    "--include-partial-messages",
-    "--append-system-prompt",
-    persona.buildPersonaPrompt({
-      agentMode,
-      screenshotPath,
-      provider: PROVIDERS.CLAUDE,
-      sharedTranscript,
-      includeLongMemory,
-      memoryRecallRequested,
-      skillsEnabled: settings.get("skillsEnabled") !== false,
-      deepPersona: shouldUseDeepPersona(trimmed)
-    })
+    "--include-partial-messages"
   ];
+  if (promptFile) {
+    args.push("--append-system-prompt-file", promptFile.file);
+  } else {
+    args.push("--append-system-prompt", systemPrompt);
+  }
 
   const claudeModel = String(settings.get("claudeModel") || "").trim();
   if (claudeModel) {
@@ -1644,24 +1675,17 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
   } else {
     // Without agent mode she still needs file tools for memory + light helpfulness.
     // Bash and network tools stay off until the Doctor enables agent mode.
-    args.push("--allowedTools", "Read Edit Write Glob Grep LS");
+    args.push("--allowedTools", "Read,Edit,Write,Glob,Grep,LS");
   }
 
   if (sessionIds[PROVIDERS.CLAUDE]) {
     args.push("--resume", sessionIds[PROVIDERS.CLAUDE]);
   }
-  // `--` terminates option parsing. Without it, variadic flags like
-  // `--allowedTools` (which accepts several space-separated tool names as
-  // separate argv entries) greedily swallow the trailing positional prompt,
-  // leaving claude with no input → it exits with "Input must be provided"
-  // and the Doctor sees an empty reply. The separator guarantees the prompt
-  // is always treated as the positional input, even if it begins with "-".
-  args.push("--", trimmed);
 
   return {
     command: resolveExecutable("claude"),
     args,
-    stdin: null
+    stdin: trimmed
   };
 }
 

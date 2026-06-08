@@ -584,6 +584,24 @@ button.tool-pill:hover {
   text-underline-offset: 2px;
 }
 
+.msg.assistant ul,
+.msg.assistant ol {
+  margin: 3px 0;
+  padding-left: 18px;
+}
+
+.msg.assistant li {
+  margin: 2px 0;
+}
+
+.msg.assistant blockquote {
+  margin: 3px 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--her-edge);
+  background: rgba(123, 223, 242, 0.06);
+  border-radius: 0 4px 4px 0;
+}
+
 .empty-state {
   text-align: center;
   color: var(--muted);
@@ -674,7 +692,7 @@ button.primary:disabled {
 }
 
 .resize-edge.e {
-  top: 4px;
+  top: 36px;
   bottom: 10px;
   right: 0;
   width: 6px;
@@ -682,7 +700,7 @@ button.primary:disabled {
 }
 
 .resize-edge.w {
-  top: 4px;
+  top: 36px;
   bottom: 10px;
   left: 0;
   width: 6px;
