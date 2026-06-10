@@ -10,7 +10,7 @@ function onChannel(channel) {
 
 contextBridge.exposeInMainWorld("petApi", {
   hidePopover: () => ipcRenderer.invoke("popover:hide"),
-  getPopoverBounds: () => ipcRenderer.invoke("popover:get-bounds"),
+  getPopoverBounds: (options) => ipcRenderer.invoke("popover:get-bounds", options),
   resizePopoverDrag: (payload) => ipcRenderer.invoke("popover:resize-drag", payload),
   movePopover: (point) => ipcRenderer.invoke("popover:move", point),
   notePopoverActivity: () => ipcRenderer.invoke("popover:activity"),

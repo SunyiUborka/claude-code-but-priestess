@@ -47,6 +47,15 @@ const DESKTOP_PET_SIZES = Object.freeze({
 let tray;
 let popover;
 let popoverSizeSaveTimer = null;
+let isMovingPopover = false;
+// The authoritative popover size. Only legitimate resize paths (creation,
+// explicit edge-handle drags, show-time clamping) update it; any other size
+// the window reports on Windows is a spurious WM_SIZE and gets reverted.
+// This must NOT be re-read from getBounds() at move start — on high-DPI the
+// spurious shrink can land before the move begins, which would lock the
+// wrong (small) size in for the whole drag.
+let popoverExpectedSize = null;
+let moveEndFallbackTimer = null;
 let desktopPet;
 let desktopPetTimer = null;
 let desktopPetPositionSaveTimer = null;
@@ -193,17 +202,36 @@ function resizePopoverDrag({ edge = "se", start = {}, dx = 0, dy = 0 } = {}) {
   let y = e.includes("n") ? bottom - height : sy;
   x = clampNumber(x, work.x + 4, work.x + work.width - width - 4);
   y = clampNumber(y, work.y + 4, work.y + work.height - height - 4);
+  popoverExpectedSize = { width, height };
   popover.setBounds({ x, y, width, height }, false);
   scheduleSavePopoverSize();
   return { x, y, width, height };
 }
 
+// Shared fallback: if the renderer crashes or the pointer is released outside
+// the window (no pointerup on document), reset after 5 s of inactivity so the
+// size-save guard does not stay locked forever.  Reset on every move so an
+// active long-press never trips the timeout.
+function resetMoveEndFallback() {
+  clearTimeout(moveEndFallbackTimer);
+  moveEndFallbackTimer = setTimeout(() => {
+    isMovingPopover = false;
+  }, 5000);
+}
+
+// Move the popover to an absolute screen position, clamped so it stays within
+// the work area of whichever display the target point lands on. Used by the
+// "carry her around the screen" gesture in the renderer.
 // Move the popover to an absolute screen position, clamped so it stays within
 // the work area of whichever display the target point lands on. Used by the
 // "carry her around the screen" gesture in the renderer.
 function movePopoverTo(point = {}) {
   if (!popover || popover.isDestroyed()) return null;
   const bounds = popover.getBounds();
+  // On Windows, clamp and move with the authoritative size — bounds may be
+  // momentarily wrong if a spurious WM_SIZE landed mid-drag.
+  const width = (process.platform === 'win32' && popoverExpectedSize?.width) || bounds.width;
+  const height = (process.platform === 'win32' && popoverExpectedSize?.height) || bounds.height;
   const targetX = Number(point.x);
   const targetY = Number(point.y);
   if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return null;
@@ -252,6 +280,7 @@ function syncPopoverBackground() {
 
 function createPopover() {
   const size = initialPopoverSize();
+  popoverExpectedSize = { width: size.width, height: size.height };
   popover = new BrowserWindow({
     width: size.width,
     height: size.height,
@@ -296,7 +325,34 @@ function createPopover() {
 
   popover.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
 
-  popover.on("resize", scheduleSavePopoverSize);
+  // The renderer's edge handles are the only legitimate user resize path
+  // (the window is not natively resizable), so block any OS-initiated resize
+  // gesture outright — on Windows a frameless window can receive one while
+  // the header is pressed or dragged on high-DPI displays.
+  popover.on("will-resize", (event) => {
+    if (process.platform === "win32") event.preventDefault();
+  });
+
+  popover.on("resize", () => {
+    if (
+      process.platform === "win32" &&
+      popoverExpectedSize &&
+      popover &&
+      !popover.isDestroyed()
+    ) {
+      const bounds = popover.getBounds();
+      if (
+        bounds.width !== popoverExpectedSize.width ||
+        bounds.height !== popoverExpectedSize.height
+      ) {
+        // Spurious WM_SIZE (header press/drag on high-DPI) — restore the
+        // authoritative size instead of letting the shrink stick or be saved.
+        popover.setBounds({ x: bounds.x, y: bounds.y, ...popoverExpectedSize }, false);
+        return;
+      }
+    }
+    scheduleSavePopoverSize();
+  });
 
   popover.on("closed", () => {
     clearTimeout(popoverSizeSaveTimer);
@@ -492,6 +548,7 @@ function setDesktopPetSize(sizeKey) {
 function openChatFromDesktopPet() {
   if (!popover) createPopover();
   const restoredSize = initialPopoverSize();
+  popoverExpectedSize = { width: restoredSize.width, height: restoredSize.height };
   popover.setSize(restoredSize.width, restoredSize.height, false);
   const petBounds = desktopPet?.getBounds();
   hideDesktopPet();
@@ -526,7 +583,8 @@ function showPopover() {
   const bounds = popover.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const work = display.workArea;
-  const size = clampPopoverSize(bounds, display);
+  const size = clampPopoverSize(popoverExpectedSize || bounds, display);
+  popoverExpectedSize = { width: size.width, height: size.height };
   popover.setBounds({
     x: clampNumber(bounds.x, work.x + 4, work.x + work.width - size.width - 4),
     y: clampNumber(bounds.y, work.y + 4, work.y + work.height - size.height - 4),
@@ -1409,7 +1467,7 @@ ipcMain.handle("desktop-pet:move", (_, point) => moveDesktopPetTo(point));
 
 ipcMain.handle("popover:move", (_, point) => movePopoverTo(point));
 
-ipcMain.handle("popover:get-bounds", () => {
+ipcMain.handle("popover:get-bounds", (_, options) => {
   if (!popover || popover.isDestroyed()) return null;
   return popover.getBounds();
 });
