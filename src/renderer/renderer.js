@@ -63,7 +63,15 @@ const RENDERER_TEXT = {
     btn_clear: "清除",
     btn_clear_title: "清除对话",
     btn_stop: "停止回复",
-    btn_stop_title: "停止回复"
+    btn_stop_title: "停止回复",
+    preview_expand: "▼ 预览",
+    preview_collapse: "▸ 预览",
+    preview_title: "HTML 预览",
+    preview_open: "在浏览器中打开",
+    preview_open_title: "在默认浏览器中打开",
+    preview_close_title: "关闭预览",
+    preview_browser_opened: "已在浏览器中打开。",
+    preview_browser_failed: "打开浏览器失败。"
   },
   en: {
     chat_empty_hint: "Say something to her.",
@@ -83,7 +91,15 @@ const RENDERER_TEXT = {
     btn_clear: "Clear",
     btn_clear_title: "Clear conversation",
     btn_stop: "Stop",
-    btn_stop_title: "Stop replying"
+    btn_stop_title: "Stop replying",
+    preview_expand: "▼ Preview",
+    preview_collapse: "▸ Preview",
+    preview_title: "HTML Preview",
+    preview_open: "Open in Browser",
+    preview_open_title: "Open in default browser",
+    preview_close_title: "Close preview",
+    preview_browser_opened: "Opened in browser.",
+    preview_browser_failed: "Failed to open browser."
   },
   ja: {
     chat_empty_hint: "何か話しかけてください。",
@@ -103,7 +119,15 @@ const RENDERER_TEXT = {
     btn_clear: "クリア",
     btn_clear_title: "会話をクリア",
     btn_stop: "停止",
-    btn_stop_title: "返信を停止"
+    btn_stop_title: "返信を停止",
+    preview_expand: "▼ プレビュー",
+    preview_collapse: "▸ プレビュー",
+    preview_title: "HTML プレビュー",
+    preview_open: "ブラウザで開く",
+    preview_open_title: "デフォルトブラウザで開く",
+    preview_close_title: "プレビューを閉じる",
+    preview_browser_opened: "ブラウザで開きました。",
+    preview_browser_failed: "ブラウザを開けませんでした。"
   }
 };
 
@@ -127,6 +151,9 @@ function applyL10n() {
   clearBtn.title = t("btn_clear_title");
   cancelBtn.textContent = t("btn_stop");
   cancelBtn.title = t("btn_stop_title");
+  openInBrowserBtn.textContent = t("preview_open");
+  openInBrowserBtn.title = t("preview_open_title");
+  closePreviewBtn.title = t("preview_close_title");
 }
 
 // ============================================================
@@ -1187,14 +1214,14 @@ function syncPreviewButtons() {
   for (const btn of buttons) {
     const mid = btn.dataset.previewId;
     btn.classList.toggle("active", mid === activePreviewId);
-    btn.textContent = mid === activePreviewId ? "▼ Preview" : "▸ Preview";
+    btn.textContent = mid === activePreviewId ? t("preview_expand") : t("preview_collapse");
   }
   if (htmlPanelOpen && activePreviewId) {
     const msg = lastHistory.find((m) => m.id === activePreviewId);
     const label = msg ? (msg.id || "").slice(-8) : activePreviewId.slice(-8);
-    previewTitle.textContent = `HTML Preview · ${label}`;
+    previewTitle.textContent = `${t("preview_title")} · ${label}`;
   } else {
-    previewTitle.textContent = "HTML Preview";
+    previewTitle.textContent = t("preview_title");
   }
 }
 
@@ -1267,7 +1294,7 @@ function addPreviewButtons() {
     btn.type = "button";
     btn.className = "msg-preview-btn";
     btn.dataset.previewId = messageId;
-    btn.textContent = messageId === activePreviewId ? "▼ Preview" : "▸ Preview";
+    btn.textContent = messageId === activePreviewId ? t("preview_expand") : t("preview_collapse");
     btn.addEventListener("click", () => {
       if (htmlPanelOpen && activePreviewId === messageId) return;
       if (htmlPanelOpen) {
@@ -1758,10 +1785,10 @@ openInBrowserBtn.addEventListener("click", async () => {
   try {
     const result = await window.previewApi?.openInBrowser?.({ html });
     if (result?.ok) {
-      showBubble("Opened in browser.", 1800);
+      showBubble(t("preview_browser_opened"), 1800);
     }
   } catch {
-    showBubble("Failed to open browser.", 3000);
+    showBubble(t("preview_browser_failed"), 3000);
   }
 });
 

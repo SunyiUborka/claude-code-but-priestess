@@ -11,8 +11,8 @@
       <div class="bar-title">
         <span class="dot" aria-hidden="true"></span>
         <span>PRTS</span>
-        <span class="provider-badge" id="providerBadge">Detecting...</span>
-        <span class="agent-badge" id="agentBadge" hidden>⚡ agent</span>
+        <span class="provider-badge" id="providerBadge">检测中...</span>
+        <span class="agent-badge" id="agentBadge" hidden>⚡ 代理</span>
       </div>
       <div class="bar-actions">
         <button type="button" id="clearBtn" class="ghost" title="清除对话">清除</button>
@@ -30,10 +30,10 @@
       <div class="preview-divider" id="previewDivider" hidden aria-hidden="true"></div>
       <aside class="html-preview" id="htmlPreview" hidden>
         <header class="preview-header">
-          <span class="preview-title" id="previewTitle">HTML Preview</span>
+          <span class="preview-title" id="previewTitle">HTML 预览</span>
           <div class="preview-actions">
-            <button type="button" id="openInBrowserBtn" class="ghost preview-btn" title="Open in default browser">Open in Browser</button>
-            <button type="button" id="closePreviewBtn" class="ghost preview-btn preview-close" title="Close preview">&times;</button>
+            <button type="button" id="openInBrowserBtn" class="ghost preview-btn" title="在默认浏览器中打开">在浏览器中打开</button>
+            <button type="button" id="closePreviewBtn" class="ghost preview-btn preview-close" title="关闭预览">&times;</button>
           </div>
         </header>
         <!-- No allow-same-origin: combined with allow-scripts on a srcdoc
@@ -44,7 +44,7 @@
         <iframe id="previewFrame"
                 sandbox="allow-scripts allow-forms allow-modals"
                 srcdoc=""
-                title="HTML Preview"
+                title="HTML 预览"
                 allow="clipboard-write"></iframe>
       </aside>
     </div>
@@ -53,7 +53,7 @@
       <form id="composer" autocomplete="off">
         <textarea
           id="composerInput"
-          placeholder="Talk to her…  (Shift+Enter for newline)"
+          placeholder="和她说点什么…（Shift+Enter 换行）"
           rows="1"
           spellcheck="false"
         ></textarea>
