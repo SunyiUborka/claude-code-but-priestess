@@ -1727,6 +1727,13 @@ function captureWithScreencapture(out) {
 
 function captureWithGrim(out) {
   if (process.platform !== "linux") return false;
+  // 先检测 grim 是否已安装，未安装则跳过，不弹任何错误
+  try {
+    const probe = spawnSync("which", ["grim"], { stdio: "ignore", timeout: 1000 });
+    if (probe.status !== 0) return false;
+  } catch {
+    return false;
+  }
   try {
     const result = spawnSync("grim", [out], {
       stdio: "ignore",
