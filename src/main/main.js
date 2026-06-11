@@ -1671,6 +1671,9 @@ app.whenReady().then(() => {
     if (patch && "outfit" in patch && tray) {
       tray.setImage(buildTrayIcon());
     }
+    if (patch && "menuLanguage" in patch) {
+      updateContextMenu();
+    }
     if (popover && !popover.isDestroyed()) {
       popover.webContents.send("settings:state", buildSettingsState());
     }
