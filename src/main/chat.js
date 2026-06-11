@@ -1725,6 +1725,23 @@ function captureWithScreencapture(out) {
   }
 }
 
+function captureWithGrim(out) {
+  if (process.platform !== "linux") return false;
+  try {
+    const result = spawnSync("grim", [out], {
+      stdio: "ignore",
+      timeout: 3500
+    });
+    return (
+      result.status === 0 &&
+      fs.existsSync(out) &&
+      fs.statSync(out).size > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function takeScreenshot() {
   if (process.platform === "darwin" && screenCaptureBlocked) return null;
 
@@ -1747,6 +1764,13 @@ async function takeScreenshot() {
     // trust from terminal/Claude workflows, then attach the file to Codex via
     // `-i`. Electron capture is only a fallback.
     if (captureWithScreencapture(out)) {
+      return out;
+    }
+
+    // Linux path: grim (wlroots native) avoids Wayland portal permission dialog.
+    // Must come before desktopCapturer fallback — same pattern as macOS
+    // captureWithScreencapture above.
+    if (captureWithGrim(out)) {
       return out;
     }
 
