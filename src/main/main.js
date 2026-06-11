@@ -1002,7 +1002,8 @@ function buildSettingsState() {
   return {
     ...settings.getAll(),
     chatProvider: providerAvailability.activeProvider || settings.get("chatProvider"),
-    providerAvailability
+    providerAvailability,
+    appVersion: app.getVersion()
   };
 }
 

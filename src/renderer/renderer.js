@@ -1780,6 +1780,7 @@ window.chatApi.onProactive?.((payload) => {
 // ============================================================
 const agentBadge = document.getElementById("agentBadge");
 const providerBadge = document.getElementById("providerBadge");
+const versionBadge = document.getElementById("versionBadge");
 
 let queueLength = 0;
 let lastSettingsPayload = null;
@@ -1806,6 +1807,7 @@ function refreshComposerMeta() {
     cwdLine.title = "";
   }
   if (providerBadge) providerBadge.textContent = provider;
+  if (versionBadge && payload?.appVersion) versionBadge.textContent = `v${payload.appVersion}`;
   if (agentBadge) agentBadge.hidden = !payload?.agentMode;
   sendBtn.disabled = !backendReady;
   composerInput.placeholder = backendReady
