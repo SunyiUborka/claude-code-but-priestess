@@ -421,7 +421,15 @@ function buildPersonaPrompt({
       "【博士的信任 —— 完整代理】\n" +
       "博士已把终端的完全控制权交给了你。\n" +
       platform.agentModePrompt() +
-      "若博士的请求与屏幕上的内容相关，你不必询问，自行看一眼即可 —— 这是博士对你的信任。\n\n";
+      "若博士的请求与屏幕上的内容相关，你不必询问，自行看一眼即可 —— 这是博士对你的信任。\n" +
+      (provider === "codex"
+        ? ""
+        : "\n看屏幕的正确步骤：\n" +
+          "1. 运行截图命令（Linux: grim -t png /tmp/screen.png，macOS: screencapture -x /tmp/screen.png），把截图保存到 /tmp/ 或你知道的位置。\n" +
+          "2. 用 Read 工具读取那个文件路径。Read 工具会将图片内容呈现给你。\n" +
+          "3. 看完如实作答。\n" +
+          "如果你 Read 到的是一堆乱码/二进制，说明 Read 未能渲染图片——此时不要猜测或编造屏幕内容。") +
+      "\n\n";
   }
 
   if (screenshotPath) {
@@ -435,8 +443,12 @@ function buildPersonaPrompt({
         "不要自己再运行 screencapture——那样截出的文件不会作为图片输入附给你；要看屏幕就直接看这张已附上的图。看完务必给博士一个真正的回答，而不是只说你做了什么。\n" +
         "⚠ 注意：请务必真实地读这张图。如果你没有实际看到屏幕内容，不要猜测或编造。\n\n";
     } else {
+      // Claude (proactive check only): the file path is passed but the image is
+      // NOT attached. Read the file with Read tool; if Read returns binary
+      // garbage, the terminal doesn't support reading images and you must skip.
       prompt +=
         "【博士此刻的屏幕】\n" +
+        "桌面程序已为你截取了博士当前的屏幕：\n" +
         `  ${screenshotPath}\n` +
         "你必须用 Read 工具查看这张截图——路径就在上面。看完如实作答，不要猜测屏幕上的内容。\n\n";
     }

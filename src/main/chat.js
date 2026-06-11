@@ -2165,14 +2165,17 @@ async function launchProviderTurn({
   const silentTurn = Boolean(silentTurnKind);
   const proactiveCheck = silentTurnKind === "proactive";
   const autoScreenshot = agentMode && settings.get("autoScreenshot") !== false;
-  // Chained turns normally skip the screenshot, but an auto-continuation needs a
-  // fresh screen so she can actually answer what she "saw". Proactive checks
-  // exist to look at the screen, so they always capture one regardless of
-  // agent mode.
+  // Codex 有 -i 图片附件机制，自动截图由系统完成、文件作为图片直接送入上下文。
+  // Claude CLI 没有图片附件机制：普通对话不走自动截图（Read PNG 返回二进制乱码导致幻觉），
+  // 但 proactive check 仍需传递截图路径，因为模型没有对话上下文可以自己截。
   const screenshotPath =
-    proactiveCheck || (autoScreenshot && (!chained || forceScreenshot))
-      ? await takeScreenshot()
-      : null;
+    provider === PROVIDERS.CODEX
+      ? (proactiveCheck || (autoScreenshot && (!chained || forceScreenshot)))
+        ? await takeScreenshot()
+        : null
+      : provider === PROVIDERS.CLAUDE && proactiveCheck
+        ? await takeScreenshot()
+        : null;
   if (proactiveCheck && !screenshotPath) {
     // Screen access is the whole point of a proactive check — without it
     // (e.g. macOS Screen Recording not granted) skip instead of running blind.

@@ -1666,6 +1666,7 @@ app.whenReady().then(() => {
 
   settings.subscribe((_, patch) => {
     syncTrayTooltip();
+    updateContextMenu();
     // The dedicated icon.png doesn't change with the outfit, but the cropped
     // head fallback does — refresh it so the tray follows an outfit switch.
     if (patch && "outfit" in patch && tray) {
