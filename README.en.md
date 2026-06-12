@@ -41,6 +41,12 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 >
 > **Arch Linux?** Install from AUR: `yay -S priestess-arknights`
 
+> ⚠️ **WARNING — Not a daily-driver tool**
+>
+> Due to the complexity and fragmentation of Linux desktop environments, this project is **strongly NOT recommended** as a daily productivity tool!!!
+> For actual work needs, please use **Codex** or **Claude Code** CLI directly.
+> This project is for desktop customization enthusiasts, Arknights story fans, and those who want Priestess to keep them company while coding on the side.
+
 ## Which file should I download?
 
 | You are… | Download this | You also need |
