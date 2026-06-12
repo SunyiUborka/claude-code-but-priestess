@@ -274,6 +274,25 @@ Tray right-click → **"老婆模式 · Waifu mode (she looks after you)"**. Ent
 optional and off by default; enabling shows a consent dialog first, because it
 means periodic screenshots plus one model call per check.
 
+> ⚠️ **Known limitations — hard to get right on Linux, PRs welcome**
+>
+> Due to protocol and CLI capability constraints, waifu mode has significant
+> limitations on Linux:
+>
+> - **Claude Code backend is NOT usable.** `claude -p` mode does not support
+>   multimodal input — the `Read` tool returns `[Unsupported Image]`, the model
+>   simply can't see screenshots. So waifu mode is essentially crippled when
+>   using Claude Code.
+> - **CodeX works fine.** If you're using the CodeX backend, waifu mode is fully
+>   functional.
+> - **Screenshot capture is difficult on Linux.** There is no universal
+>   background screenshot solution across all Linux desktops. Niri and other
+>   Wayland compositors could use `wlr-screencopy` for seamless capture, but
+>   implementing this uniformly across GNOME / KDE / Hyprland (each with its
+>   own protocol) is extremely involved.
+> - The author has exhausted reasonable approaches. **PRs welcome** if you have
+>   ideas or solutions.
+
 Every ~20 minutes she takes a quiet look at the screen and **decides for
 herself whether to speak**:
 
