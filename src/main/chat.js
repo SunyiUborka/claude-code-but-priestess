@@ -236,7 +236,7 @@ function canSpawnExecutable(candidate) {
       env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
       shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(candidate),
       stdio: "ignore",
-      timeout: 1800
+      timeout: 5000
     });
     return !probe.error && probe.status === 0;
   } catch {
@@ -244,7 +244,7 @@ function canSpawnExecutable(candidate) {
   }
 }
 
-function detectProvider(provider) {
+function detectProvider(provider, previous = null) {
   const normalized = normalizeProvider(provider);
   for (const candidate of executableCandidates(normalized)) {
     try {
@@ -260,6 +260,14 @@ function detectProvider(provider) {
     } catch {
       /* try next candidate */
     }
+  }
+  // Sticky availability: a CLI that was working moments ago and whose binary
+  // is still on disk is almost certainly mid-self-update (claude replaces its
+  // bundle near-daily), not uninstalled. A single missed probe used to demote
+  // it and silently flip the backend; a genuinely broken CLI still surfaces
+  // a visible error on the next send.
+  if (previous?.available && previous.command && canAccessExecutable(previous.command)) {
+    return { ...previous };
   }
   return {
     provider: normalized,
@@ -286,9 +294,10 @@ function detectPriestessProvider() {
 }
 
 function scanProviderAvailability() {
+  const previous = providerAvailability;
   return {
-    [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE),
-    [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX),
+    [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE, previous?.[PROVIDERS.CLAUDE]),
+    [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX, previous?.[PROVIDERS.CODEX]),
     [PROVIDERS.PRIESTESS]: detectPriestessProvider()
   };
 }
@@ -353,10 +362,12 @@ function refreshProviderAvailability() {
     providerAvailability = scanProviderAvailability();
     providerAvailabilityScannedAt = now;
   }
-  const selected = selectAvailableProvider(settings.get("chatProvider"), providerAvailability);
-  if (selected && settings.get("chatProvider") !== selected) {
-    settings.set({ chatProvider: selected });
-  }
+  // Deliberately NO settings.set here: the effective provider is computed per
+  // send via selectAvailableProvider, and the tray radio shows activeProvider.
+  // Persisting the fallback meant one transient detection miss permanently
+  // overwrote the Doctor's chosen backend (a probe that landed during a claude
+  // self-update flipped chatProvider to the VS Code codex binary, 2026-06-12).
+  // Only an explicit menu click writes chatProvider now.
   return getProviderAvailability();
 }
 
