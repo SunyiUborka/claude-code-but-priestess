@@ -45,9 +45,8 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 
 | You are… | Download this | You also need |
 | --- | --- | --- |
-| macOS user (Apple Silicon) | [`PRTS-<version>-arm64.dmg`](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest) | A local, authenticated `claude` or `codex` CLI (or configure the built-in direct backend from the tray) |
-| Windows 10 / 11 (x64) user | [`PRTS.Setup.<version>.exe`](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest), or portable `PRTS-<version>-win.zip` | Same as above; Windows builds are experimental and unsigned |
-| Linux user | See the [fork](https://github.com/aklnaaw/claude-code-but-priestess) | — |
+| Arch Linux user (recommended) | `yay -S priestess-arknights` or `paru -S priestess-arknights` | — |
+| Other Linux distros | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (portable) or [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (Debian/Ubuntu) | A local, authenticated `claude` or `codex` CLI |
 | Developer | Clone the repo, `npm install && npm run dev` | Node + npm |
 
 ## Features

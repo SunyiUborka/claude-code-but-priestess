@@ -42,6 +42,14 @@ Linux システムトレイコンパニオンアプリです。キャラクタ�
 >
 > **Arch Linux ユーザーですか？** AUR からインストール: `yay -S priestess-arknights`
 
+## どれをダウンロードすればいい？
+
+| あなたは… | これをダウンロード | 他に必要なもの |
+| --- | --- | --- |
+| Arch Linux ユーザー（推奨） | `yay -S priestess-arknights` または `paru -S priestess-arknights` | — |
+| その他の Linux ディストリビューション | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（ポータブル）または [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | ローカルにインストール・認証済みの `claude` または `codex` CLI |
+| 開発者 | クローンして `npm install && npm run dev` | Node + npm |
+
 ## 機能
 
 - システムトレイアプリ。パッケージ化後はタスクバーウィンドウなし。

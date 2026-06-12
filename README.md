@@ -42,9 +42,8 @@
 
 | 你是… | 下载这个 | 还需要什么 |
 | --- | --- | --- |
-| macOS（M 系列芯片）普通用户 | [`PRTS-<版本>-arm64.dmg`](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest) | 本机装好并登录 `claude` 或 `codex` CLI（或在托盘里配置内置直连后端） |
-| Windows 10 / 11（x64）用户 | [`PRTS.Setup.<版本>.exe`](https://github.com/SVAH-X/claude-code-but-priestess/releases/latest)，或免安装的 `PRTS-<版本>-win.zip` | 同上；Windows 版属实验性、未签名 |
-| Linux 用户 | 见 [fork](https://github.com/aklnaaw/claude-code-but-priestess) | — |
+| Arch Linux 用户（推荐） | `yay -S priestess-arknights` 或 `paru -S priestess-arknights` | — |
+| 其他 Linux 发行版 | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（解压即用）或 [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | 本机装好并登录 `claude` 或 `codex` CLI |
 | 开发者 / 想改代码 | 克隆源码后 `npm install && npm run dev` | Node + npm |
 
 ## 功能
