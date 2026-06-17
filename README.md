@@ -358,3 +358,7 @@ renderer 启动时不再需要逐帧抠图；运行时白底抠图逻辑仍然�
 ## 说明
 
 这个仓库不内置第三方版权美术。角色图像请在权利方条款和画师授权范围内使用。
+
+---
+
+> 💡 本人技术有限，代码难免有 Bug。如有问题欢迎提 [Issues](https://github.com/aklnaaw/priestess-arknights/issues) 反馈，或有更好的实现欢迎提交 PR 指正。
