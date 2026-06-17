@@ -6,9 +6,14 @@ Language: [简体中文](README.md) | **English** | [日本語](README.ja.md)
   <img src="assets/character/睁眼.png" alt="Priestess (普瑞赛斯)" width="220">
 </p>
 
-> **Linux fork** — based on [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess),
+> **Linux fork** — this project is a Linux port of [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess),
 > adding Linux (Wayland/X11) tray support, AUR packaging, and Chinese i18n.
-> See the upstream repo for macOS / Windows versions.
+>
+> **Original author: [SVAH-X](https://github.com/SVAH-X)** — credit for the original design and implementation of the Priestess desktop companion.
+>
+> **📌 If you are a Windows or macOS user, please use the upstream repo:**
+> [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)
+> This repository only maintains the Linux port and packaging.
 
 A Linux system tray companion. The character (普瑞赛斯, from Arknights) lives in
 your tray area as a small head icon. Click her and a popover opens with
@@ -442,3 +447,7 @@ enclosed near-white regions — never bulk-remove white; see the note in
 This repository does not bundle third-party copyrighted artwork. Use the
 character art only in line with the rights holder's terms and the artist's
 permission.
+
+---
+
+> 💡 My skills are limited, and bugs are inevitable. If you encounter issues, please report them via [Issues](https://github.com/aklnaaw/priestess-arknights/issues). If you have a better implementation, PRs are always welcome.

@@ -6,9 +6,14 @@
   <img src="assets/character/睁眼.png" alt="プレセア (普瑞赛斯)" width="220">
 </p>
 
-> **Linux fork** — [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess) をベースに、
-> Linux (Wayland/X11) トレイ対応、AUR パッケージ、中国語 i18n を追加したフォークです。
-> macOS / Windows 版は上流リポジトリを参照してください。
+> **Linux fork** — 本プロジェクトは [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)
+> の Linux 移植版であり、Linux (Wayland/X11) トレイ対応、AUR パッケージ、中国語 i18n を追加しています。
+>
+> **原作者: [SVAH-X](https://github.com/SVAH-X)** — プレセアデスクトップコンパニオンのオリジナルデザインと実装を手がけました。
+>
+> **📌 Windows または macOS ユーザーの方は、上流リポジトリをご利用ください：**
+> [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)
+> 本リポジトリは Linux 移植とパッケージングのみをメンテナンスしています。
 
 Linux システムトレイコンパニオンアプリです。キャラクター（プレセア、アークナイツより）が
 トレイエリアに小さなヘッドアイコンとして常駐します。アイコンをクリックすると、
@@ -370,3 +375,7 @@ PNG ファイルはディスク上で変更されません。レンダラーは�
 
 このリポジトリは第三者の著作権のあるアートワークをバンドルしていません。
 キャラクター画像は権利者の利用規約およびイラストレーターの許可に従って使用してください。
+
+---
+
+> 💡 作者の技術力には限りがあり、バグは避けられません。問題があれば [Issues](https://github.com/aklnaaw/priestess-arknights/issues) でご報告いただくか、より良い実装があれば PR を歓迎します。
