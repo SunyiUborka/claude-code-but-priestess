@@ -72,6 +72,22 @@ let desktopPetPositionSaveTimer = null;
 let windowFadeTimer = null;
 let priestessSettingsWindow = null;
 
+// ── 平台会话检测 ──────────────────────────────────────────────
+// 直接读取 $XDG_SESSION_TYPE 判断 Wayland / X11，
+// 比 tray.getBounds() 全零推断更可靠。
+// https://www.freedesktop.org/software/systemd/man/latest/pam_systemd.html#XDG_SESSION_TYPE
+function getSessionType() {
+  const st = process.env.XDG_SESSION_TYPE;
+  if (st === "wayland" || st === "x11") return st;
+  // $XDG_SESSION_TYPE 缺失时（SSH、tty、非常规登录），
+  // 尝试 $WAYLAND_DISPLAY 作为辅助判断
+  if (process.env.WAYLAND_DISPLAY) return "wayland";
+  return "unknown";
+}
+
+function isWayland() { return getSessionType() === "wayland"; }
+function isX11() { return getSessionType() === "x11"; }
+
 // ============================================================
 //  Built-in Priestess backend settings — a small local-only window. The
 //  server URL / API key / model are stored in settings.json inside userData
@@ -460,7 +476,9 @@ function positionPopover() {
   // at the bottom of the screen, while macOS puts it at the top.
   // On Wayland (Niri, GNOME, KDE) tray.getBounds() may return all zeros;
   // fall back to top-right of the primary display.
-  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0;
+  // We now explicitly check $XDG_SESSION_TYPE rather than relying solely on
+  // the all-zero heuristic, which can also trigger on broken X11 trays.
+  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0 && !isWayland();
   let x, y;
   if (hasValidBounds) {
     x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
@@ -468,6 +486,7 @@ function positionPopover() {
     const above = Math.round(trayBounds.y - winBounds.height - 6);
     y = below + winBounds.height <= work.y + work.height ? below : above;
   } else {
+    // Wayland / no-valid-bounds: pop to top-right corner
     x = work.x + work.width - winBounds.width - 16;
     y = work.y + 8;
   }

@@ -12,6 +12,15 @@ const persona = require("./persona");
 const skills = require("./skills");
 const priestessProvider = require("./priestess-provider");
 
+// ── 平台会话检测 ──────────────────────────────────────────────
+function getSessionType() {
+  const st = process.env.XDG_SESSION_TYPE;
+  if (st === "wayland" || st === "x11") return st;
+  if (process.env.WAYLAND_DISPLAY) return "wayland";
+  return "unknown";
+}
+function isWayland() { return getSessionType() === "wayland"; }
+function isX11() { return getSessionType() === "x11"; }
 
 const PROVIDERS = Object.freeze({
   CLAUDE: "claude",
@@ -1756,7 +1765,7 @@ function captureWithScreencapture(out) {
 
 function captureWithGrim(out) {
   if (process.platform !== "linux") return false;
-  // 先检测 grim 是否已安装，未安装则跳过，不弹任何错误
+  if (!isWayland()) return false; // grim 只在 wlroots Wayland 下有效
   try {
     const probe = spawnSync("which", ["grim"], { stdio: "ignore", timeout: 1000 });
     if (probe.status !== 0) return false;
@@ -1767,6 +1776,103 @@ function captureWithGrim(out) {
     const result = spawnSync("grim", [out], {
       stdio: "ignore",
       timeout: 3500
+    });
+    return (
+      result.status === 0 &&
+      fs.existsSync(out) &&
+      fs.statSync(out).size > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Wayland 截图工具：gnome-screenshot（GNOME）、spectacle（KDE）
+// grim 缺失时作为补充，避免直接落到 desktopCapturer 弹 portal 对话框
+function captureWithGnomeScreenshot(out) {
+  if (process.platform !== "linux") return false;
+  try {
+    const probe = spawnSync("which", ["gnome-screenshot"], { stdio: "ignore", timeout: 1000 });
+    if (probe.status !== 0) return false;
+  } catch {
+    return false;
+  }
+  try {
+    const result = spawnSync("gnome-screenshot", ["-f", out], {
+      stdio: "ignore",
+      timeout: 5000
+    });
+    return (
+      result.status === 0 &&
+      fs.existsSync(out) &&
+      fs.statSync(out).size > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function captureWithSpectacle(out) {
+  if (process.platform !== "linux") return false;
+  try {
+    const probe = spawnSync("which", ["spectacle"], { stdio: "ignore", timeout: 1000 });
+    if (probe.status !== 0) return false;
+  } catch {
+    return false;
+  }
+  try {
+    const result = spawnSync("spectacle", ["-b", "-n", "-o", out], {
+      stdio: "ignore",
+      timeout: 5000
+    });
+    return (
+      result.status === 0 &&
+      fs.existsSync(out) &&
+      fs.statSync(out).size > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+// X11 截图工具：maim（轻量）、ImageMagick import（广泛安装）
+function captureWithMaim(out) {
+  if (process.platform !== "linux") return false;
+  if (!isX11()) return false;
+  try {
+    const probe = spawnSync("which", ["maim"], { stdio: "ignore", timeout: 1000 });
+    if (probe.status !== 0) return false;
+  } catch {
+    return false;
+  }
+  try {
+    const result = spawnSync("maim", [out], {
+      stdio: "ignore",
+      timeout: 3500
+    });
+    return (
+      result.status === 0 &&
+      fs.existsSync(out) &&
+      fs.statSync(out).size > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function captureWithImport(out) {
+  if (process.platform !== "linux") return false;
+  if (!isX11()) return false;
+  try {
+    const probe = spawnSync("which", ["import"], { stdio: "ignore", timeout: 1000 });
+    if (probe.status !== 0) return false;
+  } catch {
+    return false;
+  }
+  try {
+    const result = spawnSync("import", ["-window", "root", out], {
+      stdio: "ignore",
+      timeout: 5000
     });
     return (
       result.status === 0 &&
@@ -1803,12 +1909,22 @@ async function takeScreenshot() {
       return out;
     }
 
-    // Linux path: grim (wlroots native) avoids Wayland portal permission dialog.
-    // Must come before desktopCapturer fallback — same pattern as macOS
-    // captureWithScreencapture above.
-    if (captureWithGrim(out)) {
-      return out;
+    // Linux path: probe the best available screenshot tool based on session type,
+    // avoiding the Electron desktopCapturer portal permission dialog whenever possible.
+    //   Wayland: grim (wlroots) → gnome-screenshot (GNOME) → spectacle (KDE) → desktopCapturer
+    //   X11:     maim → import (ImageMagick) → desktopCapturer
+    if (isWayland()) {
+      if (captureWithGrim(out)) return out;
+      if (captureWithGnomeScreenshot(out)) return out;
+      if (captureWithSpectacle(out)) return out;
     }
+    if (isX11()) {
+      if (captureWithMaim(out)) return out;
+      if (captureWithImport(out)) return out;
+    }
+    // Session type unknown — try grim (most common on modern Linux) then maim
+    if (captureWithGrim(out)) return out;
+    if (captureWithMaim(out)) return out;
 
     if (process.platform !== "darwin") {
       try {
