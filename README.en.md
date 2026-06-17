@@ -57,7 +57,7 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 | You are… | Download this | You also need |
 | --- | --- | --- |
 | Arch Linux user (recommended) | `yay -S priestess-arknights` or `paru -S priestess-arknights` | — |
-| Other Linux distros | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (portable) or [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (Debian/Ubuntu) | A local, authenticated `claude` or `codex` CLI |
+| Other Linux distros | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (portable) or [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (Debian/Ubuntu) | A local, authenticated `claude` / `codex` CLI, or configure the built-in Priestess API backend |
 | Developer | Clone the repo, `npm install && npm run dev` | Node + npm |
 
 ## Features
@@ -233,13 +233,16 @@ Artifacts land in `dist/`.
 
 ## Usage backends
 
-This app only talks to local CLI backends. It does not use cloud API keys
-directly and it does not support arbitrary agents.
+This app supports local CLI backends and also ships a built-in "Priestess" API
+backend that can connect to any OpenAI-compatible server. The API base URL, key,
+and model are stored only in the local `settings.json` and are sent only to the
+server you configure.
 
-Supported local CLIs:
+Supported backends:
 
-- Claude Code: `claude`
+- Claude Code CLI: `claude`
 - Codex CLI: `codex`
+- Built-in Priestess API backend: tray right-click → **"Built-in Priestess settings…"**
 
 Backend selection is automatic:
 
@@ -249,8 +252,9 @@ Backend selection is automatic:
   show Codex as a selectable option.
 - If only `codex` is available, the app locks to Codex and does not show
   Claude Code as a selectable option.
-- If neither CLI is found, the popover shows `No CLI`, sending is disabled,
-  and the tray menu shows `Usage backend: no local CLI found`.
+- If neither CLI is found, you can still configure the built-in Priestess API
+  backend via tray right-click → **"Built-in Priestess settings…"**. Until
+  configured, the popover shows `No CLI` and sending is disabled.
 
 Detection runs at startup, when opening the usage-backend menu, and before
 sending a message. It checks the current `PATH`, common local binary

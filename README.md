@@ -54,7 +54,7 @@
 | 你是… | 下载这个 | 还需要什么 |
 | --- | --- | --- |
 | Arch Linux 用户（推荐） | `yay -S priestess-arknights` 或 `paru -S priestess-arknights` | — |
-| 其他 Linux 发行版 | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（解压即用）或 [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | 本机装好并登录 `claude` 或 `codex` CLI |
+| 其他 Linux 发行版 | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（解压即用）或 [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | 本机装好并登录 `claude` / `codex` CLI，或配置内置普瑞赛斯 API 后端 |
 | 开发者 / 想改代码 | 克隆源码后 `npm install && npm run dev` | Node + npm |
 
 ## 功能
@@ -172,19 +172,21 @@ npm run dist:linux    # 仅 Linux：AppImage + deb
 **系统要求**
 
 - Linux x86_64，Wayland 或 X11 会话
-- 本机已安装并登录 [Claude Code](https://claude.ai/code) CLI（`claude`）
-  或 [Codex](https://platform.openai.com/docs/codex) CLI（`codex`）至少
-  一个，详见下面的 **[后端支持](#后端支持)**。
+- 已安装并登录 [Claude Code](https://claude.ai/code) CLI（`claude`）/
+  [Codex](https://platform.openai.com/docs/codex) CLI（`codex`），
+  或配置内置普瑞赛斯 API 后端，详见下面的 **[后端支持](#后端支持)**。
 
 ## 后端支持
 
-这个应用只支持本地 CLI 后端，不直接使用云端 API key，也不支持任意
-第三方 agent。
+这个应用支持本地 CLI 后端，也内置了「普瑞赛斯」API 后端，可直接连接
+OpenAI 兼容接口。API 地址、Key 和模型名只保存在本机 `settings.json`
+中，并只会发送给你配置的服务器。
 
-支持的本地 CLI：
+支持的后端：
 
-- Claude Code：`claude`
+- Claude Code CLI：`claude`
 - Codex CLI：`codex`
+- 内置普瑞赛斯 API 后端：右键托盘菜单 → **「内置普瑞赛斯设置…」**
 
 后端选择规则：
 
@@ -192,8 +194,8 @@ npm run dist:linux    # 仅 Linux：AppImage + deb
   使用 Claude Code。
 - 如果本机只有 `claude`，应用会锁定 Claude Code，不显示 Codex 选项。
 - 如果本机只有 `codex`，应用会锁定 Codex，不显示 Claude Code 选项。
-- 如果两个都没有，popover 顶部显示 `No CLI`，发送按钮禁用，右键菜单
-  显示 `Usage backend: no local CLI found`。
+- 如果两个本地 CLI 都没有，仍可通过右键托盘菜单 → **「内置普瑞赛斯设置…」**
+  配置 OpenAI 兼容接口；未配置前，popover 顶部会显示 `No CLI`，发送按钮禁用。
 
 探测会在启动时、打开后端菜单时、发送消息前执行。它会检查当前 `PATH`、
 常见本地二进制目录，以及 VS Code / Cursor 的 OpenAI 扩展内置 Codex
