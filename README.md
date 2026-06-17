@@ -6,9 +6,14 @@
   <img src="assets/character/睁眼.png" alt="普瑞赛斯" width="220">
 </p>
 
-> **Linux fork** — 基于 [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)
-> 的发行版，新增 Linux 系统托盘支持（Wayland / X11）、AUR 打包、中文界面。
-> macOS / Windows 版本见上游仓库。
+> **Linux fork** — 本项目是 [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)
+> 的 Linux 发行版，新增 Linux 系统托盘支持（Wayland / X11）、AUR 打包、中文界面。
+>
+> **原项目作者：[SVAH-X](https://github.com/SVAH-X)** — 感谢他创造了普瑞赛斯桌宠的原始设计与实现。
+>
+> **📌 如果你是 Windows 或 macOS 用户，请前往上游仓库：**
+> [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)
+> 本仓库仅维护 Linux 平台的适配与打包。
 
 这是一个 Linux 系统托盘桌宠。普瑞赛斯会以一个小头像待在托盘区域；
 点击头像后，会弹出一个带角色立绘和聊天框的 popover。她通过本机已经
