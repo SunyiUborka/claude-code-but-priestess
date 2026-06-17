@@ -58,7 +58,7 @@ Linux システムトレイコンパニオンアプリです。キャラクタ�
 | あなたは… | これをダウンロード | 他に必要なもの |
 | --- | --- | --- |
 | Arch Linux ユーザー（推奨） | `yay -S priestess-arknights` または `paru -S priestess-arknights` | — |
-| その他の Linux ディストリビューション | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（ポータブル）または [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | ローカルにインストール・認証済みの `claude` または `codex` CLI |
+| その他の Linux ディストリビューション | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（ポータブル）または [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | ローカルにインストール・認証済みの `claude` / `codex` CLI、または内蔵 Priestess API バックエンドの設定 |
 | 開発者 | クローンして `npm install && npm run dev` | Node + npm |
 
 ## 機能
@@ -199,13 +199,16 @@ npm run dist:linux    # Linux のみ：AppImage + deb
 
 ## 使用バックエンド
 
-このアプリはローカル CLI バックエンドとのみ通信します。クラウド API キーを直接使用せず、
-任意のサードパーティエージェントもサポートしません。
+このアプリはローカル CLI バックエンドをサポートし、さらに内蔵の「Priestess」API
+バックエンドを備えており、OpenAI 互換のサーバーに直接接続できます。
+API アドレス、Key、モデル名はローカルの `settings.json` にのみ保存され、
+設定したサーバーにのみ送信されます。
 
-サポートしているローカル CLI：
+サポートしているバックエンド：
 
-- Claude Code：`claude`
+- Claude Code CLI：`claude`
 - Codex CLI：`codex`
+- 内蔵 Priestess API バックエンド：トレイ右クリック → **「内置普瑞赛斯设置…」**
 
 バックエンド選択ルール：
 
@@ -213,8 +216,9 @@ npm run dist:linux    # Linux のみ：AppImage + deb
   Linux のデフォルトは Claude Code。
 - `claude` のみ利用可能な場合、アプリは Claude Code に固定され、Codex オプションは非表示。
 - `codex` のみ利用可能な場合、アプリは Codex に固定され、Claude Code オプションは非表示。
-- どちらも見つからない場合、ポップオーバーに `No CLI` と表示、送信ボタンは無効化、
-  トレイメニューは `Usage backend: no local CLI found` を表示。
+- どちらも見つからない場合でも、トレイ右クリック → **「内置普瑞赛斯设置…」**
+  から OpenAI 互換インターフェースを設定できます。設定前はポップオーバーに
+  `No CLI` と表示され、送信ボタンは無効化されます。
 
 検出は起動時、バックエンドメニューを開いた時、メッセージ送信前に実行されます。
 現在の `PATH`、一般的なローカルバイナリディレクトリ、VS Code / Cursor の
