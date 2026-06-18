@@ -3,7 +3,7 @@
 //  Claude Code and Codex keep separate session ids, while persona,
 //  memory, working directory, and renderer state stay shared.
 // ============================================================
-const { spawn, spawnSync } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -11,6 +11,7 @@ const settings = require("./settings");
 const persona = require("./persona");
 const skills = require("./skills");
 const priestessProvider = require("./priestess-provider");
+const { spawnCli, spawnCliSync } = require("./cli-spawn");
 
 // ── 平台会话检测 ──────────────────────────────────────────────
 function getSessionType() {
@@ -250,9 +251,11 @@ function canAccessExecutable(candidate) {
 
 function canSpawnExecutable(candidate) {
   try {
-    const probe = spawnSync(candidate, ["--version"], {
+    // 超时是上限，不是等待时间——正常的 CLI 在 50-400ms 内返回 --version。
+    // 5s 只为极端情况预留：macOS 首次执行刚自更新的 claude（~220MB 包，几乎每日发布）
+    // 会进行深度扫描，旧上限经常导致误判 CLI 不可用。
+    const probe = spawnCliSync(candidate, ["--version"], {
       env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
-      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(candidate),
       stdio: "ignore",
       timeout: 5000
     });
@@ -466,10 +469,9 @@ function loadCodexModelCatalog() {
     return codexModelCatalogCache.values;
   }
   try {
-    const result = spawnSync(command, ["debug", "models"], {
+    const result = spawnCliSync(command, ["debug", "models"], {
       encoding: "utf8",
       env: { ...process.env, NO_COLOR: "1" },
-      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
       timeout: 3000,
       maxBuffer: 8 * 1024 * 1024
     });
@@ -1960,7 +1962,8 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
     skillsEnabled: settings.get("skillsEnabled") !== false,
     deepPersona: shouldUseDeepPersona(trimmed),
     observeEnabled:
-      settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode)
+      settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode),
+    personaNotes: settings.get("personaNotes") || ""
   });
   const promptFile = createInvocationTempFile("prts-claude-", "system-prompt.txt", systemPrompt);
   const args = [
@@ -1998,7 +2001,8 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
   return {
     command: resolveExecutable("claude"),
     args,
-    stdin: trimmed
+    stdin: `${trimmed}\n`,
+    cleanupDirs: promptFile ? [promptFile.dir] : []
   };
 }
 
@@ -2016,7 +2020,8 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
       skillsEnabled: settings.get("skillsEnabled") !== false,
       deepPersona: shouldUseDeepPersona(trimmed),
       observeEnabled:
-        settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode)
+        settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode),
+      personaNotes: settings.get("personaNotes") || ""
     }) +
     "\n\n【博士本轮请求】\n" +
     trimmed
@@ -2244,7 +2249,8 @@ function launchPriestessTurn(trimmed) {
     includeLongMemory,
     memoryRecallRequested,
     skillsEnabled: settings.get("skillsEnabled") !== false,
-    deepPersona: shouldUseDeepPersona(trimmed)
+    deepPersona: shouldUseDeepPersona(trimmed),
+    personaNotes: settings.get("personaNotes") || ""
   });
 
   const finishCommon = () => {
@@ -2346,16 +2352,16 @@ async function launchProviderTurn({
   let proc;
   try {
     turnLaunching = false;
-    proc = spawn(invocation.command, invocation.args, {
+    proc = spawnCli(invocation.command, invocation.args, {
       cwd,
-      env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
-      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(invocation.command)
+      env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" }
     });
     if (invocation.stdin != null) {
       proc.stdin.end(invocation.stdin);
     }
   } catch (error) {
     turnLaunching = false;
+    cleanupInvocation(invocation);
     pushSystem(
       `启动 \`${providerLabel(provider)}\` 失败: ${error.message}。请确认 CLI 已安装且在 PATH 中。`
     );
@@ -2392,6 +2398,7 @@ async function launchProviderTurn({
 
   proc.on("error", (error) => {
     if (currentProcess !== proc) return;
+    cleanupInvocation(invocation);
     pushSystem(`\`${providerLabel(provider)}\` 进程出错: ${error.message}`);
     finalizeAssistant("");
     currentProcess = null;
@@ -2436,6 +2443,7 @@ async function launchProviderTurn({
       claudeResultErrored = false;
       const retrySilentKind = silentTurnKind;
       if (pendingAssistantId) finalizeAssistant(""); // clears the empty bubble
+      cleanupInvocation(invocation);
       currentProcess = null;
       currentProvider = null;
       // Replay keeps the turn's silent nature (finalize just reset it).
@@ -2464,6 +2472,7 @@ async function launchProviderTurn({
       const retrySilentKind = silentTurnKind;
       if (pendingAssistantId) finalizeAssistant("");
       pushSystem(`Claude 模型 \`${badClaudeModel}\` 当前账号不可用，已切回默认并重试。`);
+      cleanupInvocation(invocation);
       currentProcess = null;
       currentProvider = null;
       silentTurnKind = retrySilentKind;
@@ -2481,6 +2490,7 @@ async function launchProviderTurn({
       codexContinuationPending = false;
       codexAutoContinued = true;
       if (pendingAssistantId) finalizeAssistant("");
+      cleanupInvocation(invocation);
       currentProcess = null;
       currentProvider = null;
       claudeResultErrored = false;
@@ -2506,6 +2516,7 @@ async function launchProviderTurn({
       );
     }
     if (pendingAssistantId) finalizeAssistant("");
+    cleanupInvocation(invocation);
     currentProcess = null;
     currentProvider = null;
     claudeResultErrored = false;

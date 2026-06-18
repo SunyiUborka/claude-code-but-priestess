@@ -62,7 +62,10 @@ const DEFAULTS = Object.freeze({
   // the pet to fine-tune; the tray menu offers preset stops.
   desktopPetScale: 1.0,
   desktopPetPosition: null,
-  popoverSize: { width: 380, height: 560 }
+  popoverSize: { width: 380, height: 560 },
+  // 博士通过「补充校准」菜单项在应用内编写的自由格式人格补充。
+  // 以【博士的补充校准】追加在基础人格之后。最多约 1500 字；空字符串 = 不生效。
+  personaNotes: ""
 });
 
 let cache = { ...DEFAULTS };

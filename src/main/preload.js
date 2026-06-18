@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld("priestessApi", {
   closeSettings: () => ipcRenderer.invoke("priestess:close-settings")
 });
 
+contextBridge.exposeInMainWorld("personaNotesApi", {
+  get: () => ipcRenderer.invoke("persona-notes:get"),
+  set: (notes) => ipcRenderer.invoke("persona-notes:set", notes),
+  close: () => ipcRenderer.invoke("persona-notes:close")
+});
+
 contextBridge.exposeInMainWorld("chatApi", {
   send: (text) => ipcRenderer.invoke("chat:send", text),
   cancel: () => ipcRenderer.invoke("chat:cancel"),

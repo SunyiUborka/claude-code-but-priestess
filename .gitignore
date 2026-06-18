@@ -3,4 +3,6 @@ dist/
 .dev/
 .DS_Store
 .claude/
+# 本地归档（例如打包仓库迁移到另一台机器）
+*.7z
 CLAUDE.md

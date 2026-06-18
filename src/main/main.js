@@ -71,6 +71,7 @@ let desktopPetTimer = null;
 let desktopPetPositionSaveTimer = null;
 let windowFadeTimer = null;
 let priestessSettingsWindow = null;
+let personaNotesWindow = null;
 
 // ── 平台会话检测 ──────────────────────────────────────────────
 // 直接读取 $XDG_SESSION_TYPE 判断 Wayland / X11，
@@ -87,6 +88,47 @@ function getSessionType() {
 
 function isWayland() { return getSessionType() === "wayland"; }
 function isX11() { return getSessionType() === "x11"; }
+
+// ============================================================
+//  Persona supplement notes — a small local-only window where the
+//  Doctor can write freeform calibration notes injected into the
+//  system prompt as 【博士的补充校准】.
+// ============================================================
+function openPersonaNotesWindow() {
+  if (personaNotesWindow && !personaNotesWindow.isDestroyed()) {
+    personaNotesWindow.show();
+    personaNotesWindow.focus();
+    return;
+  }
+  personaNotesWindow = new BrowserWindow({
+    width: 500,
+    height: 480,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    title: "PRTS · 补充校准",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  personaNotesWindow.setMenuBarVisibility?.(false);
+  hardenWebContents(personaNotesWindow.webContents);
+  personaNotesWindow.loadFile(
+    path.join(__dirname, "..", "renderer", "persona-notes.html")
+  );
+  personaNotesWindow.once("ready-to-show", () => {
+    personaNotesWindow?.show();
+    personaNotesWindow?.focus();
+  });
+  personaNotesWindow.on("closed", () => {
+    personaNotesWindow = null;
+  });
+}
 
 // ============================================================
 //  Built-in Priestess backend settings — a small local-only window. The
@@ -828,6 +870,7 @@ const MENU_TEXT = {
     usageBackend: "使用后端",
     usageBackendOne: (provider) => `使用后端：${provider}`,
     priestessSettings: "内置普瑞赛斯设置…",
+    personaNotes: "补充校准…",
     modelClaude: "模型（Claude）",
     modelCodex: "模型（Codex）",
     defaultClaude: "默认（CLI/账户）",
@@ -891,6 +934,7 @@ const MENU_TEXT = {
     usageBackend: "Usage backend",
     usageBackendOne: (provider) => `Usage backend: ${provider}`,
     priestessSettings: "Built-in Priestess settings…",
+    personaNotes: "Persona supplement…",
     modelClaude: "Model (Claude)",
     modelCodex: "Model (Codex)",
     defaultClaude: "Default (CLI/account)",
@@ -946,6 +990,7 @@ const MENU_TEXT = {
     sonnetAlias: "Sonnet（最新エイリアス）",
     haikuAlias: "Haiku（最新エイリアス）",
     currentCustom: (model) => `現在のカスタム: ${model}`,
+    personaNotes: "補足校准…",
     autoScreenshot: "毎ターン自動スクリーンショット",
     desktopPet: "待機中にデスクトップペットを表示",
     showDesktopPet: "デスクトップペットを表示",
@@ -1399,6 +1444,10 @@ function buildContextMenu() {
       click: () => openPriestessSettings()
     },
     {
+      label: mt("personaNotes"),
+      click: () => openPersonaNotesWindow()
+    },
+    {
       label: mt("autoScreenshot"),
       type: "checkbox",
       visible: Boolean(all.agentMode),
@@ -1845,6 +1894,20 @@ ipcMain.handle("priestess:test-connection", (_, cfg) =>
 
 ipcMain.handle("priestess:close-settings", () => {
   priestessSettingsWindow?.close();
+});
+
+// ── Persona supplement notes ──────────────────────────────────
+ipcMain.handle("persona-notes:get", () =>
+  settings.get("personaNotes") || ""
+);
+
+ipcMain.handle("persona-notes:set", (_, notes) => {
+  settings.set({ personaNotes: String(notes || "").trim().slice(0, 1500) });
+  return { ok: true };
+});
+
+ipcMain.handle("persona-notes:close", () => {
+  personaNotesWindow?.close();
 });
 
 ipcMain.handle("popover:preview-open", (_, payload) => {
