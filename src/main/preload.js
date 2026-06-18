@@ -43,6 +43,17 @@ contextBridge.exposeInMainWorld("personaNotesApi", {
   close: () => ipcRenderer.invoke("persona-notes:close")
 });
 
+contextBridge.exposeInMainWorld("creditsApi", {
+  get: () => ipcRenderer.invoke("credits:get"),
+  openLink: (url) => ipcRenderer.invoke("credits:open-link", url),
+  close: () => ipcRenderer.invoke("credits:close")
+});
+
+contextBridge.exposeInMainWorld("updateApi", {
+  getState: () => ipcRenderer.invoke("update:get-state"),
+  onProgress: onChannel("update:progress")
+});
+
 contextBridge.exposeInMainWorld("chatApi", {
   send: (text, attachments) => ipcRenderer.invoke("chat:send", { text, attachments }),
   pickFiles: () => ipcRenderer.invoke("chat:pick-files"),
