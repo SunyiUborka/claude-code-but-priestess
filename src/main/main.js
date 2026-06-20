@@ -1,7 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-const { spawn } = require("node:child_process");
 const {
   app,
   BrowserWindow,
@@ -21,8 +20,9 @@ const chat = require("./chat");
 const persona = require("./persona");
 const platform = require("./platform");
 const proactive = require("./proactive");
+const updater = require("./updater");
 const priestessProvider = require("./priestess-provider");
-
+const { spawnCli } = require("./cli-spawn");
 
 let conversationFile = null;
 let saveTimer = null;
@@ -76,29 +76,10 @@ let desktopPetPositionSaveTimer = null;
 let liveDesktopPetScale = null;
 let desktopPetScalePersistTimer = null;
 let pendingDesktopPetScalePosition = null;
-// Fixed bottom-centre anchor held for the duration of a scroll-resize gesture
-// (cx, bottom as floats). Seeded from the real window when a gesture starts,
-// then held — re-reading getBounds() every tick drifts because it lags our own
-// rapid setBounds() calls.
-let desktopPetScaleAnchor = null;
-let desktopPetScaleLastAt = 0;
-
 let windowFadeTimer = null;
 let priestessSettingsWindow = null;
 let personaNotesWindow = null;
-
-// ── 平台会话检测 ──────────────────────────────────────────────
-// 直接读取 $XDG_SESSION_TYPE 判断 Wayland / X11，
-// 比 tray.getBounds() 全零推断更可靠。
-// https://www.freedesktop.org/software/systemd/man/latest/pam_systemd.html#XDG_SESSION_TYPE
-function getSessionType() {
-  const st = process.env.XDG_SESSION_TYPE;
-  if (st === "wayland" || st === "x11") return st;
-  // $XDG_SESSION_TYPE 缺失时（SSH、tty、非常规登录），
-  // 尝试 $WAYLAND_DISPLAY 作为辅助判断
-  if (process.env.WAYLAND_DISPLAY) return "wayland";
-  return "unknown";
-}
+let creditsWindow = null;
 
 // Contributors, ordered by first contribution. Roles are one concise line each
 // (a credits screen, not a changelog). The artist is listed last with her own
@@ -141,14 +122,6 @@ const CREDITS = [
       { label: "抖音 26916156149", url: null },
       { label: "原作品视频 BV1ZKVY6sESy", url: "https://www.bilibili.com/video/BV1ZKVY6sESy" }
     ]
-  },
-  {
-    name: "十月祈雨",
-    role: { zh: "图像资源增强性修复", en: "Image assets enhancement" },
-    links: [
-      { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },
-      { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }
-    ]
   }
 ];
 // Ephemeral cat Easter egg state — not persisted, changes on each transition.
@@ -165,15 +138,11 @@ function maybeSendCatMode(petWindow) {
     petWindow.webContents.send("desktop-pet:cat-mode", currentCatMode);
   }
 }
-}
-
-function isWayland() { return getSessionType() === "wayland"; }
-function isX11() { return getSessionType() === "x11"; }
 
 // ============================================================
-//  Persona supplement notes — a small local-only window where the
-//  Doctor can write freeform calibration notes injected into the
-//  system prompt as 【博士的补充校准】.
+//  Built-in Priestess backend settings — a small local-only window. The
+//  server URL / API key / model are stored in settings.json inside userData
+//  and are only ever sent to the server the Doctor configures there.
 // ============================================================
 function openPersonaNotesWindow() {
   if (personaNotesWindow && !personaNotesWindow.isDestroyed()) {
@@ -211,11 +180,43 @@ function openPersonaNotesWindow() {
   });
 }
 
-// ============================================================
-//  Built-in Priestess backend settings — a small local-only window. The
-//  server URL / API key / model are stored in settings.json inside userData
-//  and are only ever sent to the server the Doctor configures there.
-// ============================================================
+// In-app contributors / credits list. Static content driven by the CREDITS
+// table above; links are opened through the main process (shell.openExternal)
+// because the window's webContents are hardened against navigation.
+function openCreditsWindow() {
+  if (creditsWindow && !creditsWindow.isDestroyed()) {
+    creditsWindow.show();
+    creditsWindow.focus();
+    return;
+  }
+  creditsWindow = new BrowserWindow({
+    width: 460,
+    height: 560,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    title: "PRTS · 制作者名单",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  creditsWindow.setMenuBarVisibility?.(false);
+  hardenWebContents(creditsWindow.webContents);
+  creditsWindow.loadFile(path.join(__dirname, "..", "renderer", "credits.html"));
+  creditsWindow.once("ready-to-show", () => {
+    creditsWindow?.show();
+    creditsWindow?.focus();
+  });
+  creditsWindow.on("closed", () => {
+    creditsWindow = null;
+  });
+}
+
 function openPriestessSettings() {
   if (priestessSettingsWindow && !priestessSettingsWindow.isDestroyed()) {
     priestessSettingsWindow.show();
@@ -372,6 +373,10 @@ function initialPopoverSize() {
 
 function scheduleSavePopoverSize() {
   if (!popover || popover.isDestroyed()) return;
+  // Windows may fire a spurious WM_SIZE during setPosition on frameless
+  // windows — skip the save while a move is in flight so a transient
+  // wrong size is never persisted to settings.
+  if (process.platform === 'win32' && isMovingPopover) return;
   clearTimeout(popoverSizeSaveTimer);
   popoverSizeSaveTimer = setTimeout(() => {
     if (!popover || popover.isDestroyed()) return;
@@ -434,9 +439,6 @@ function resetMoveEndFallback() {
 // Move the popover to an absolute screen position, clamped so it stays within
 // the work area of whichever display the target point lands on. Used by the
 // "carry her around the screen" gesture in the renderer.
-// Move the popover to an absolute screen position, clamped so it stays within
-// the work area of whichever display the target point lands on. Used by the
-// "carry her around the screen" gesture in the renderer.
 function movePopoverTo(point = {}) {
   if (!popover || popover.isDestroyed()) return null;
   const bounds = popover.getBounds();
@@ -452,9 +454,15 @@ function movePopoverTo(point = {}) {
     y: Math.round(targetY)
   });
   const work = display.workArea;
-  const x = clampNumber(targetX, work.x, work.x + work.width - bounds.width);
-  const y = clampNumber(targetY, work.y, work.y + work.height - bounds.height);
-  popover.setPosition(x, y, false);
+  const x = clampNumber(targetX, work.x, work.x + work.width - width);
+  const y = clampNumber(targetY, work.y, work.y + work.height - height);
+  if (process.platform === 'win32') {
+    isMovingPopover = true;
+    resetMoveEndFallback();
+    popover.setBounds({ x, y, width, height }, false);
+  } else {
+    popover.setPosition(x, y, false);
+  }
   return { x, y };
 }
 
@@ -515,9 +523,7 @@ function createPopover() {
     // Resize only through the renderer's explicit edge handles. Native resize
     // on a frameless Windows window can treat a long press near the border as
     // an OS resize gesture and fight the custom drag implementation.
-    // On Linux (Wayland) the custom pointer-screen delta approach doesn't
-    // work reliably, so enable native resize instead.
-    resizable: process.platform !== "darwin",
+    resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
@@ -597,22 +603,10 @@ function positionPopover() {
   const winBounds = popover.getBounds();
   // Center the popover beside the tray icon. Windows commonly puts the tray
   // at the bottom of the screen, while macOS puts it at the top.
-  // On Wayland (Niri, GNOME, KDE) tray.getBounds() may return all zeros;
-  // fall back to top-right of the primary display.
-  // We now explicitly check $XDG_SESSION_TYPE rather than relying solely on
-  // the all-zero heuristic, which can also trigger on broken X11 trays.
-  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0 && !isWayland();
-  let x, y;
-  if (hasValidBounds) {
-    x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
-    const below = Math.round(trayBounds.y + trayBounds.height + 6);
-    const above = Math.round(trayBounds.y - winBounds.height - 6);
-    y = below + winBounds.height <= work.y + work.height ? below : above;
-  } else {
-    // Wayland / no-valid-bounds: pop to top-right corner
-    x = work.x + work.width - winBounds.width - 16;
-    y = work.y + 8;
-  }
+  let x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
+  const below = Math.round(trayBounds.y + trayBounds.height + 6);
+  const above = Math.round(trayBounds.y - winBounds.height - 6);
+  let y = below + winBounds.height <= work.y + work.height ? below : above;
   // Clamp inside the active display so we never spill off-screen.
   x = Math.max(work.x + 4, Math.min(work.x + work.width - winBounds.width - 4, x));
   y = Math.max(work.y + 4, Math.min(work.y + work.height - winBounds.height - 4, y));
@@ -643,6 +637,7 @@ function defaultDesktopPetPosition(display = screen.getPrimaryDisplay()) {
 }
 
 function desktopPetScale() {
+  if (liveDesktopPetScale != null) return liveDesktopPetScale;
   const raw = Number(settings.get("desktopPetScale"));
   if (!Number.isFinite(raw)) return 1.0;
   return Math.min(DESKTOP_PET_SCALE_MAX, Math.max(DESKTOP_PET_SCALE_MIN, raw));
@@ -699,7 +694,7 @@ function createDesktopPet() {
     backgroundColor: "#00000000",
     alwaysOnTop: true,
     focusable: true,
-    title: "PRTS 桌面宠物",
+    title: "PRTS Desktop Pet",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -748,7 +743,9 @@ function showDesktopPet() {
     collapsePopoverToDesktopPet();
     return;
   }
-  createDesktopPet().showInactive();
+  const pet = createDesktopPet();
+  maybeSendCatMode(pet);
+  pet.showInactive();
 }
 
 function scheduleDesktopPet() {
@@ -759,8 +756,6 @@ function scheduleDesktopPet() {
 }
 
 function moveDesktopPetTo(point = {}) {
-  // Dragging relocates her, so any held resize anchor is now stale.
-  desktopPetScaleAnchor = null;
   const position = clampDesktopPetPosition(point);
   createDesktopPet().setBounds({ ...position, ...desktopPetSize() }, false);
   clearTimeout(desktopPetPositionSaveTimer);
@@ -772,25 +767,17 @@ function moveDesktopPetTo(point = {}) {
 
 function setDesktopPetScale(scale) {
   const next = Math.min(DESKTOP_PET_SCALE_MAX, Math.max(DESKTOP_PET_SCALE_MIN, Number(scale) || 1));
+  // Keep her feet planted: resize anchored at the bottom-center.
+  const old = desktopPetSize();
   // Apply immediately via the transient scale; desktopPetSize() reads it so the
   // window resizes this frame without touching disk.
   liveDesktopPetScale = next;
   if (desktopPet && !desktopPet.isDestroyed()) {
+    const bounds = desktopPet.getBounds();
     const size = desktopPetSize();
-    // Keep her feet planted: resize around a FIXED bottom-centre anchor. The
-    // anchor is seeded from the real window only when a fresh gesture starts
-    // (or after a >200ms pause); during a continuous scroll it is held, so the
-    // position is always recomputed from the same fixed point and never drifts.
-    const now = Date.now();
-    if (!desktopPetScaleAnchor || now - desktopPetScaleLastAt > 200) {
-      const b = desktopPet.getBounds();
-      desktopPetScaleAnchor = { cx: b.x + b.width / 2, bottom: b.y + b.height };
-    }
-    desktopPetScaleLastAt = now;
-    const a = desktopPetScaleAnchor;
     const position = clampDesktopPetPosition({
-      x: Math.round(a.cx - size.width / 2),
-      y: Math.round(a.bottom - size.height)
+      x: bounds.x + Math.round((old.width - size.width) / 2),
+      y: bounds.y + (old.height - size.height)
     });
     desktopPet.setBounds({ ...position, ...size }, false);
     pendingDesktopPetScalePosition = position;
@@ -805,11 +792,10 @@ function setDesktopPetScale(scale) {
     pendingDesktopPetScalePosition = null;
     settings.set(patch);
   }, 250);
-
 }
 
-// Scroll over the pet: factor > 1 grows, < 1 shrinks. Persisted via
-// setDesktopPetScale's settings writes (already debounced by tininess).
+// Scroll over the pet: factor > 1 grows, < 1 shrinks. Resizes live; the scale
+// is persisted on a debounce by setDesktopPetScale.
 function scaleDesktopPetBy(factor) {
   const f = Number(factor);
   if (!Number.isFinite(f) || f <= 0) return desktopPetScale();
@@ -847,6 +833,16 @@ function openChatFromDesktopPet() {
     console.warn("main: failed to anchor popover to desktop pet", error);
   }
   showPopover();
+  const chatCat =
+    Math.random() < 0.0314
+      ? { cat: true, mood: Math.random() < 0.7 ? "normal" : "crying" }
+      : { cat: false, mood: "normal" };
+  if (popover && !popover.isDestroyed()) {
+    popover.webContents.send("desktop-pet:cat-mode", chatCat);
+  }
+  // Keep her self-awareness in sync with what the Doctor sees: the persona
+  // prompt acknowledges the cat form only while it's actually on screen.
+  chat.setChatCatMode(chatCat);
   return { ok: true };
 }
 
@@ -884,7 +880,9 @@ function collapsePopoverToDesktopPet() {
     return;
   }
   if (!popover || popover.isDestroyed() || !popover.isVisible()) {
-    createDesktopPet().showInactive();
+    const pet = createDesktopPet();
+    maybeSendCatMode(pet);
+    pet.showInactive();
     return;
   }
   // She returns to where she stood before the chat opened (her saved spot) —
@@ -895,6 +893,7 @@ function collapsePopoverToDesktopPet() {
   fadeWindow(popover, popover.getOpacity(), 0, 220, () => {
     popover.hide();
     popover.setOpacity(1);
+    maybeSendCatMode(pet);
     pet.showInactive();
   });
 }
@@ -944,7 +943,6 @@ const MENU_TEXT = {
     language: "语言",
     languageSystem: "跟随系统",
     languageZh: "简体中文",
-    languageJa: "日本語",
     languageEn: "English",
     system: "跟随系统",
     light: "浅色",
@@ -953,11 +951,10 @@ const MENU_TEXT = {
     outfitFormal: "正装（默认）",
     outfitCasual: "休闲",
     skills: "允许她使用技能（音乐 / 搜索 / 应用）",
-    coauthorCommits: "提交时署名普瑞赛斯（共同作者）",
     agentMode: "Agent mode（完整屏幕控制）",
     enableAgentTitle: "开启 agent mode？",
     enableAgent: "开启 agent mode",
-    waifuMode: "老婆模式（她会自己照看你）",
+    waifuMode: "老婆模式",
     enableWaifuTitle: "开启老婆模式？",
     enableWaifu: "开启老婆模式",
     waifuWarnMessage: "让普瑞赛斯时不时自己看一眼屏幕，安静地照看你？",
@@ -999,6 +996,7 @@ const MENU_TEXT = {
     clearChatDirectory: "清除聊天工作目录",
     restartPriestess: "重启普瑞赛斯",
     revealDataFolder: "打开数据目录",
+    credits: "制作者名单…",
     checkUpdates: "检查更新…",
     downloadInstallUpdate: (version) => `下载并安装 v${version}…`,
     restartUpdate: (version) => `重启并更新（v${version}）`,
@@ -1011,7 +1009,6 @@ const MENU_TEXT = {
     language: "Language",
     languageSystem: "System",
     languageZh: "简体中文",
-    languageJa: "日本語",
     languageEn: "English",
     system: "System",
     light: "Light",
@@ -1020,11 +1017,10 @@ const MENU_TEXT = {
     outfitFormal: "正装 · Formal (default)",
     outfitCasual: "休闲 · Casual",
     skills: "Let her use skills (music · search · apps)",
-    coauthorCommits: "Co-author commits as 普瑞赛斯",
     agentMode: "Agent mode (full screen control)",
     enableAgentTitle: "Enable agent mode?",
     enableAgent: "Enable agent mode",
-    waifuMode: "老婆模式 · Waifu mode (she looks after you)",
+    waifuMode: "老婆模式 · Waifu mode",
     enableWaifuTitle: "Enable waifu mode?",
     enableWaifu: "Enable waifu mode",
     waifuWarnMessage: "Let Priestess quietly peek at your screen now and then and look after you herself?",
@@ -1064,78 +1060,26 @@ const MENU_TEXT = {
     clearChatDirectory: "Clear chat directory",
     restartPriestess: "Restart Priestess",
     revealDataFolder: "Reveal data folder",
+    credits: "Contributors…",
     checkUpdates: "Check for updates…",
     downloadInstallUpdate: (version) => `Download and install v${version}…`,
     restartUpdate: (version) => `Restart to update (v${version})`,
     downloadUpdate: (version) => `Download update (v${version})…`,
     quit: "Quit"
-  },
-  ja: {
-    openChat: "チャットを開く",
-    appearance: "外観",
-    language: "言語",
-    languageSystem: "システムに従う",
-    languageZh: "简体中文",
-    languageJa: "日本語",
-    languageEn: "English",
-    system: "システムに従う",
-    light: "ライト",
-    dark: "ダーク",
-    skills: "スキルを許可（音楽・検索・アプリ）",
-    agentMode: "Agent mode（画面全体を操作）",
-    enableAgentTitle: "Agent mode を有効にしますか？",
-    enableAgent: "Agent mode を有効にする",
-    cancel: "キャンセル",
-    usageNoCli: "使用バックエンド: ローカル CLI が見つかりません",
-    usageBackend: "使用バックエンド",
-    usageBackendOne: (provider) => `使用バックエンド: ${provider}`,
-    modelClaude: "モデル（Claude）",
-    modelCodex: "モデル（Codex）",
-    defaultClaude: "デフォルト（CLI/アカウント）",
-    defaultCodex: "デフォルト（CLI/config）",
-    opusAlias: "Opus（最新エイリアス）",
-    sonnetAlias: "Sonnet（最新エイリアス）",
-    haikuAlias: "Haiku（最新エイリアス）",
-    currentCustom: (model) => `現在のカスタム: ${model}`,
-    personaNotes: "補足校准…",
-    autoScreenshot: "毎ターン自動スクリーンショット",
-    desktopPet: "待機中にデスクトップペットを表示",
-    showDesktopPet: "デスクトップペットを表示",
-    desktopPetSize: "デスクトップペットのサイズ",
-    sizeSmall: "小",
-    sizeMedium: "中",
-    sizeLarge: "大",
-    setChatDirectory: "チャット作業ディレクトリを設定…",
-    chooseProjectFolder: "チャットで使用するプロジェクトフォルダを選択",
-    clearChatDirectory: "チャット作業ディレクトリをクリア",
-    restartPriestess: "プルーシスを再起動",
-    revealDataFolder: "データフォルダを開く",
-    checkUpdates: "アップデートを確認…",
-    downloadInstallUpdate: (version) => `v${version} をダウンロードしてインストール…`,
-    restartUpdate: (version) => `再起動して更新（v${version}）`,
-    downloadUpdate: (version) => `アップデートをダウンロード（v${version}）…`,
-    quit: "終了"
   }
 };
 
 function menuLanguage() {
   const selected = String(settings.get("menuLanguage") || "system").toLowerCase();
-  if (selected === "zh" || selected === "ja" || selected === "en") return selected;
+  if (selected === "zh" || selected === "en") return selected;
   try {
     const preferred = app.getPreferredSystemLanguages?.() || [];
-    if (preferred[0]) {
-      const lang = String(preferred[0]);
-      if (/^zh\b/i.test(lang)) return "zh";
-      if (/^ja\b/i.test(lang)) return "ja";
-      return "en";
-    }
+    if (preferred[0]) return /^zh\b/i.test(String(preferred[0])) ? "zh" : "en";
   } catch {
     /* ignore */
   }
   try {
-    const locale = app.getLocale() || "";
-    if (/^zh\b/i.test(locale)) return "zh";
-    if (/^ja\b/i.test(locale)) return "ja";
+    return /^zh\b/i.test(String(app.getLocale() || "")) ? "zh" : "en";
   } catch {
     /* ignore */
   }
@@ -1190,7 +1134,7 @@ function setTheme(value) {
 }
 
 function setMenuLanguage(value) {
-  const next = value === "zh" || value === "ja" || value === "en" ? value : "system";
+  const next = value === "zh" || value === "en" ? value : "system";
   settings.set({ menuLanguage: next });
 }
 
@@ -1332,9 +1276,8 @@ function refreshCodexModelPresetsInBackground(command) {
   let stdout = "";
   let killed = false;
   try {
-    const proc = spawn(command, ["debug", "models"], {
+    const proc = spawnCli(command, ["debug", "models"], {
       env: { ...process.env, NO_COLOR: "1" },
-      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
       stdio: ["ignore", "pipe", "ignore"]
     });
     const timer = setTimeout(() => {
@@ -1509,12 +1452,6 @@ function buildContextMenu() {
           click: () => setMenuLanguage("zh")
         },
         {
-          label: mt("languageJa"),
-          type: "radio",
-          checked: all.menuLanguage === "ja",
-          click: () => setMenuLanguage("ja")
-        },
-        {
           label: mt("languageEn"),
           type: "radio",
           checked: all.menuLanguage === "en",
@@ -1527,12 +1464,6 @@ function buildContextMenu() {
       type: "checkbox",
       checked: all.skillsEnabled !== false,
       click: (item) => settings.set({ skillsEnabled: item.checked })
-    },
-    {
-      label: mt("coauthorCommits"),
-      type: "checkbox",
-      checked: all.coauthorCommits !== false,
-      click: (item) => settings.set({ coauthorCommits: item.checked })
     },
     {
       label: mt("agentMode"),
@@ -1627,6 +1558,11 @@ function buildContextMenu() {
       label: mt("revealDataFolder"),
       click: () => shell.openPath(app.getPath("userData"))
     },
+    {
+      label: mt("credits"),
+      click: () => openCreditsWindow()
+    },
+    ...buildUpdateMenuItems(),
     { type: "separator" },
     {
       label: mt("quit"),
@@ -1636,7 +1572,9 @@ function buildContextMenu() {
   ]);
 }
 
-// Quit and relaunch.
+// Quit and relaunch. The main use is macOS Screen Recording: that permission
+// only takes effect after a restart, so once the Doctor grants it this makes
+// "grant → restart" a single click instead of a manual quit + reopen.
 function restartApp() {
   // app.exit() skips before-quit — kill a mid-turn CLI subprocess explicitly
   // so it doesn't keep running (and billing) past the restart.
@@ -1645,10 +1583,35 @@ function restartApp() {
   app.exit(0);
 }
 
-function updateContextMenu() {
-  if (tray && !tray.isDestroyed()) {
-    tray.setContextMenu(buildContextMenu());
+// Update controls: a manual check plus, when something is waiting, an action
+// item. "download" = Windows found an update and the Doctor decides when to
+// download (installs automatically once done); "install" = ready to install;
+// "page" = just open the downloads page.
+function buildUpdateMenuItems() {
+  const pending = updater.getPendingUpdate();
+  const items = [{ label: mt("checkUpdates"), click: () => updater.checkNow() }];
+  if (pending) {
+    if (pending.action === "install") {
+      // macOS downloads + installs in place; Windows restarts into the staged
+      // installer.
+      const label =
+        process.platform === "darwin"
+          ? mt("downloadInstallUpdate", pending.version)
+          : mt("restartUpdate", pending.version);
+      items.push({ label, click: () => updater.installNow() });
+    } else if (pending.action === "download") {
+      items.push({
+        label: mt("downloadInstallUpdate", pending.version),
+        click: () => updater.installNow()
+      });
+    } else {
+      items.push({
+        label: mt("downloadUpdate", pending.version),
+        click: () => updater.openDownloadPage()
+      });
+    }
   }
+  return items;
 }
 
 function syncTrayTooltip() {
@@ -1656,7 +1619,7 @@ function syncTrayTooltip() {
   const cwd = (settings.get("chatCwd") || "").trim();
   const availability = chat.getProviderAvailability({ refresh: false });
   const active = availability.activeProvider;
-  const provider = active ? availability.providers[active].shortLabel : "就绪";
+  const provider = active ? availability.providers[active].shortLabel : "Ready";
   tray.setToolTip(cwd ? `PRTS · ${provider} · ${cwd}` : `PRTS · ${provider}`);
 }
 
@@ -1819,7 +1782,11 @@ app.whenReady().then(() => {
   tray.setIgnoreDoubleClickEvents(true);
 
   tray.on("click", () => togglePopover());
-  updateContextMenu();
+  tray.on("right-click", () => tray.popUpContextMenu(buildContextMenu()));
+
+  // Background update check (Windows self-updates; macOS notifies + opens the
+  // download page). No-op in dev / unpackaged builds.
+  updater.init();
 
   // Background self-turns: proactive screen checks (opt-in) and occasional
   // memory tidy-ups. All gating — interval, cooldown, quiet hours, daily cap,
@@ -1829,7 +1796,6 @@ app.whenReady().then(() => {
   setTimeout(() => {
     chat.refreshProviderAvailability();
     syncTrayTooltip();
-    updateContextMenu();
     if (popover && !popover.isDestroyed()) {
       popover.webContents.send("settings:state", buildSettingsState());
     }
@@ -1837,14 +1803,10 @@ app.whenReady().then(() => {
 
   settings.subscribe((_, patch) => {
     syncTrayTooltip();
-    updateContextMenu();
     // The dedicated icon.png doesn't change with the outfit, but the cropped
     // head fallback does — refresh it so the tray follows an outfit switch.
     if (patch && "outfit" in patch && tray) {
       tray.setImage(buildTrayIcon());
-    }
-    if (patch && "menuLanguage" in patch) {
-      updateContextMenu();
     }
     if (popover && !popover.isDestroyed()) {
       popover.webContents.send("settings:state", buildSettingsState());
@@ -1906,15 +1868,6 @@ app.whenReady().then(() => {
 
   createPopover();
   scheduleDesktopPet();
-
-  // On compositors without a visible system tray (Niri, GNOME Wayland
-  // without AppIndicator extension, etc.), the tray icon is registered as
-  // a StatusNotifierItem but may not be visible. Set PRTS_SHOW_ON_START=1
-  // to show the popover immediately at launch so the app is usable.
-  if (process.env.PRTS_SHOW_ON_START === "1") {
-    positionPopover();
-    showPopover();
-  }
 });
 
 app.on("window-all-closed", () => {
@@ -1948,7 +1901,29 @@ ipcMain.handle("popover:move", (_, point) => movePopoverTo(point));
 
 ipcMain.handle("popover:get-bounds", (_, options) => {
   if (!popover || popover.isDestroyed()) return null;
-  return popover.getBounds();
+  const bounds = popover.getBounds();
+  if (process.platform === 'win32') {
+    // Only a header *move* needs the size-save guard. Edge-handle resizes
+    // also fetch bounds here, and flagging those used to block their size
+    // from being saved for 5 s after the drag started.
+    if (options?.forMove) {
+      isMovingPopover = true;
+      resetMoveEndFallback();
+    }
+    // Report the authoritative size: a spurious WM_SIZE shrink may already
+    // have landed during the press, before this IPC arrived.
+    if (popoverExpectedSize) {
+      return { ...bounds, ...popoverExpectedSize };
+    }
+  }
+  return bounds;
+});
+
+ipcMain.handle("popover:move-end", () => {
+  if (process.platform !== 'win32') return;
+  isMovingPopover = false;
+  clearTimeout(moveEndFallbackTimer);
+  scheduleSavePopoverSize();
 });
 
 ipcMain.handle("popover:resize-drag", (_, payload) => resizePopoverDrag(payload));
@@ -1968,7 +1943,7 @@ ipcMain.handle("settings:get", () => buildSettingsState());
 
 ipcMain.handle("settings:pick-cwd", async () => {
   const result = await dialog.showOpenDialog({
-    title: "选择聊天工作目录",
+    title: "Choose project folder for chat",
     defaultPath: settings.get("chatCwd") || app.getPath("home"),
     properties: ["openDirectory", "createDirectory"]
   });
@@ -2009,18 +1984,26 @@ ipcMain.handle("priestess:close-settings", () => {
   priestessSettingsWindow?.close();
 });
 
-// ── Persona supplement notes ──────────────────────────────────
-ipcMain.handle("persona-notes:get", () =>
-  settings.get("personaNotes") || ""
-);
+ipcMain.handle("desktop-pet:cat-mode-get", () => currentCatMode);
 
+ipcMain.handle("persona-notes:get", () => settings.get("personaNotes") || "");
 ipcMain.handle("persona-notes:set", (_, notes) => {
-  settings.set({ personaNotes: String(notes || "").trim().slice(0, 1500) });
-  return { ok: true };
+  settings.set({ personaNotes: typeof notes === "string" ? notes.slice(0, 1500) : "" });
 });
-
 ipcMain.handle("persona-notes:close", () => {
   personaNotesWindow?.close();
+});
+
+ipcMain.handle("credits:get", () => ({
+  lang: menuLanguage(),
+  appVersion: app.getVersion(),
+  contributors: CREDITS
+}));
+ipcMain.handle("credits:open-link", (_, url) => {
+  if (typeof url === "string" && /^https:\/\//.test(url)) shell.openExternal(url);
+});
+ipcMain.handle("credits:close", () => {
+  creditsWindow?.close();
 });
 
 ipcMain.handle("popover:preview-open", (_, payload) => {
