@@ -86,6 +86,73 @@ function getSessionType() {
   return "unknown";
 }
 
+// Contributors, ordered by first contribution. Roles are one concise line each
+// (a credits screen, not a changelog). The artist is listed last with her own
+// links; her 普猫猫 art ships with permission (see LICENSE).
+const CREDITS = [
+  {
+    name: "SVAH-X",
+    role: { zh: "作者 · 维护者 · 普瑞赛斯人格与剧情考据", en: "Author · maintainer · Priestess persona & lore" },
+    links: [
+      { label: "GitHub @SVAH-X", url: "https://github.com/SVAH-X" },
+      { label: "B站 @SVAH-X", url: "https://space.bilibili.com/279608882" }
+    ]
+  },
+  {
+    name: "Leoluis0705",
+    role: { zh: "Windows 支持 · 桌宠模式", en: "Windows support · desktop pet mode" },
+    links: [{ label: "GitHub @Leoluis0705", url: "https://github.com/Leoluis0705" }]
+  },
+  {
+    name: "aklnaaw",
+    role: { zh: "Linux 适配 · 相关包维护", en: "Linux support · package maintenance" },
+    links: [
+      { label: "GitHub @aklnaaw", url: "https://github.com/aklnaaw" },
+      { label: "B站 @阿卡莲娜-official", url: "https://space.bilibili.com/1179951835" }
+    ]
+  },
+  {
+    name: "Karl_Higmut",
+    role: { zh: "HTML 预览面板 · 更新器改进", en: "HTML preview panel · updater improvements" },
+    links: [
+      { label: "GitHub @Karl-441", url: "https://github.com/Karl-441" },
+      { label: "牢普，可爱，喜欢！", url: null }
+    ],
+  },
+  {
+    name: "-浅蓝笑",
+    role: { zh: "「普猫猫」彩蛋美术（经授权收录）", en: "“普猫猫” Easter-egg art (included with permission)" },
+    links: [
+      { label: "B站 @-浅蓝笑", url: "https://space.bilibili.com/3493287025445075" },
+      { label: "抖音 26916156149", url: null },
+      { label: "原作品视频 BV1ZKVY6sESy", url: "https://www.bilibili.com/video/BV1ZKVY6sESy" }
+    ]
+  },
+  {
+    name: "十月祈雨",
+    role: { zh: "图像资源增强性修复", en: "Image assets enhancement" },
+    links: [
+      { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },
+      { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }
+    ]
+  }
+];
+// Ephemeral cat Easter egg state — not persisted, changes on each transition.
+// 3.14% per transition (π); a rare, easy-to-miss surprise. When it fires, the
+// chat window also tells the persona prompt so she's aware she's a cat.
+let currentCatMode = { cat: false, mood: "normal" };
+
+function maybeSendCatMode(petWindow) {
+  currentCatMode =
+    Math.random() < 0.0314
+      ? { cat: true, mood: Math.random() < 0.7 ? "normal" : "crying" }
+      : { cat: false, mood: "normal" };
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send("desktop-pet:cat-mode", currentCatMode);
+  }
+}
+}
+
 function isWayland() { return getSessionType() === "wayland"; }
 function isX11() { return getSessionType() === "x11"; }
 
