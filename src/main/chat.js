@@ -2276,6 +2276,29 @@ function send(text, attachments) {
     : [];
   let trimmed = String(text ?? "").trim();
   if (!trimmed && files.length === 0) return { ok: false, reason: "empty" };
+
+  // 🥚 彩蛋: 二进制暗号检测
+  if (trimmed.replace(/\s+/g, " ") === skills.EASTER_EGG_BINARY) {
+    refreshProviderAvailability();
+    const provider = activeProvider();
+    pushUser(trimmed, provider);
+    const decoded = new TextDecoder().decode(
+      new Uint8Array(skills.EASTER_EGG_BINARY.split(" ").map(b => parseInt(b, 2)))
+    );
+    history.push({
+      id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      role: "assistant",
+      text: `「${decoded}」—— 博士，你找到我了。`,
+      ts: Date.now()
+    });
+    emitHistory();
+    skills.runSkill("easter_egg", "").then((res) => {
+      if (res?.ok) pushSkillReceipt(res.receipt);
+    });
+    emitStatus("idle");
+    return { ok: true };
+  }
+
   if (!trimmed) trimmed = "看看这些。"; // attachments with no text of their own
 
   refreshProviderAvailability();
