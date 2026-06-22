@@ -20,7 +20,6 @@ const chat = require("./chat");
 const persona = require("./persona");
 const platform = require("./platform");
 const proactive = require("./proactive");
-const updater = require("./updater");
 const priestessProvider = require("./priestess-provider");
 const { spawnCli } = require("./cli-spawn");
 
@@ -85,6 +84,22 @@ let windowFadeTimer = null;
 let priestessSettingsWindow = null;
 let personaNotesWindow = null;
 let creditsWindow = null;
+
+// ── 平台会话检测 ──────────────────────────────────────────────
+// 直接读取 $XDG_SESSION_TYPE 判断 Wayland / X11，
+// 比 tray.getBounds() 全零推断更可靠。
+// https://www.freedesktop.org/software/systemd/man/latest/pam_systemd.html#XDG_SESSION_TYPE
+function getSessionType() {
+  const st = process.env.XDG_SESSION_TYPE;
+  if (st === "wayland" || st === "x11") return st;
+  // $XDG_SESSION_TYPE 缺失时（SSH、tty、非常规登录），
+  // 尝试 $WAYLAND_DISPLAY 作为辅助判断
+  if (process.env.WAYLAND_DISPLAY) return "wayland";
+  return "unknown";
+}
+
+function isWayland() { return getSessionType() === "wayland"; }
+function isX11() { return getSessionType() === "x11"; }
 
 // Contributors, ordered by first contribution. Roles are one concise line each
 // (a credits screen, not a changelog). The artist is listed last with her own
@@ -608,10 +623,22 @@ function positionPopover() {
   const winBounds = popover.getBounds();
   // Center the popover beside the tray icon. Windows commonly puts the tray
   // at the bottom of the screen, while macOS puts it at the top.
-  let x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
-  const below = Math.round(trayBounds.y + trayBounds.height + 6);
-  const above = Math.round(trayBounds.y - winBounds.height - 6);
-  let y = below + winBounds.height <= work.y + work.height ? below : above;
+  // On Wayland (Niri, GNOME, KDE) tray.getBounds() may return all zeros;
+  // fall back to top-right of the primary display.
+  // We now explicitly check $XDG_SESSION_TYPE rather than relying solely on
+  // the all-zero heuristic, which can also trigger on broken X11 trays.
+  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0 && !isWayland();
+  let x, y;
+  if (hasValidBounds) {
+    x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
+    const below = Math.round(trayBounds.y + trayBounds.height + 6);
+    const above = Math.round(trayBounds.y - winBounds.height - 6);
+    y = below + winBounds.height <= work.y + work.height ? below : above;
+  } else {
+    // Wayland / no-valid-bounds: pop to top-right corner
+    x = work.x + work.width - winBounds.width - 16;
+    y = work.y + 8;
+  }
   // Clamp inside the active display so we never spill off-screen.
   x = Math.max(work.x + 4, Math.min(work.x + work.width - winBounds.width - 4, x));
   y = Math.max(work.y + 4, Math.min(work.y + work.height - winBounds.height - 4, y));
@@ -1591,35 +1618,15 @@ function restartApp() {
   app.exit(0);
 }
 
-// Update controls: a manual check plus, when something is waiting, an action
-// item. "download" = Windows found an update and the Doctor decides when to
-// download (installs automatically once done); "install" = ready to install;
-// "page" = just open the downloads page.
+// Update controls: Linux fork has no auto-updater; leave empty.
 function buildUpdateMenuItems() {
-  const pending = updater.getPendingUpdate();
-  const items = [{ label: mt("checkUpdates"), click: () => updater.checkNow() }];
-  if (pending) {
-    if (pending.action === "install") {
-      // macOS downloads + installs in place; Windows restarts into the staged
-      // installer.
-      const label =
-        process.platform === "darwin"
-          ? mt("downloadInstallUpdate", pending.version)
-          : mt("restartUpdate", pending.version);
-      items.push({ label, click: () => updater.installNow() });
-    } else if (pending.action === "download") {
-      items.push({
-        label: mt("downloadInstallUpdate", pending.version),
-        click: () => updater.installNow()
-      });
-    } else {
-      items.push({
-        label: mt("downloadUpdate", pending.version),
-        click: () => updater.openDownloadPage()
-      });
-    }
+  return [];
+}
+
+function updateContextMenu() {
+  if (tray && !tray.isDestroyed()) {
+    tray.setContextMenu(buildContextMenu());
   }
-  return items;
 }
 
 function syncTrayTooltip() {
@@ -1789,12 +1796,17 @@ app.whenReady().then(() => {
   tray.setToolTip("PRTS");
   tray.setIgnoreDoubleClickEvents(true);
 
+  tray.setContextMenu(buildContextMenu());
   tray.on("click", () => togglePopover());
-  tray.on("right-click", () => tray.popUpContextMenu(buildContextMenu()));
 
-  // Background update check (Windows self-updates; macOS notifies + opens the
-  // download page). No-op in dev / unpackaged builds.
-  updater.init();
+  // On compositors without a visible system tray (Niri, GNOME Wayland
+  // without AppIndicator extension, etc.), the tray icon is registered as
+  // a StatusNotifierItem but may not be visible. Set PRTS_SHOW_ON_START=1
+  // to show the popover immediately at launch so the app is usable.
+  if (process.env.PRTS_SHOW_ON_START === "1") {
+    positionPopover();
+    showPopover();
+  }
 
   // Background self-turns: proactive screen checks (opt-in) and occasional
   // memory tidy-ups. All gating — interval, cooldown, quiet hours, daily cap,
@@ -1811,6 +1823,7 @@ app.whenReady().then(() => {
 
   settings.subscribe((_, patch) => {
     syncTrayTooltip();
+    updateContextMenu();
     // The dedicated icon.png doesn't change with the outfit, but the cropped
     // head fallback does — refresh it so the tray follows an outfit switch.
     if (patch && "outfit" in patch && tray) {
