@@ -2168,10 +2168,18 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
     args.push("--resume", sessionPlan.resumeSessionId);
   }
 
+  // Build the stdin (user message). When attachments exist, list their file names
+  // so the model sees them as part of the current turn's request, not just in the
+  // system prompt where they can be missed.
+  const stdinArgs =
+    (Array.isArray(pendingAttachments) && pendingAttachments.length)
+      ? trimmed + pendingAttachments.map((p) => `\n附件的路径：${p}`).join("")
+      : trimmed;
+
   return {
     command: resolveExecutable("claude"),
     args,
-    stdin: `${trimmed}\n`,
+    stdin: `${stdinArgs}\n`,
     cleanupDirs: promptFile ? [promptFile.dir] : [],
     resumed: Boolean(sessionPlan?.resumeSessionId)
   };
