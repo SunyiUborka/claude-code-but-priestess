@@ -274,7 +274,7 @@ function resolveAttachmentsForBackend(paths) {
 
 // ---- Built-in (HTTP) backend attachments: no file tools, so inline them ----
 const PRIESTESS_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
-const PRIESTESS_TEXTFILE_MAX_CHARS = 20000;
+const PRIESTESS_TEXTFILE_MAX_CHARS = 100000;
 
 function imageToDataUri(p) {
   try {
@@ -297,7 +297,8 @@ function imageToDataUri(p) {
 
 function readTextFileForInline(p) {
   try {
-    if (fs.statSync(p).size > 1024 * 1024) return null;
+    const stat = fs.statSync(p);
+    if (stat.size > 10 * 1024 * 1024) return null;
     const buf = fs.readFileSync(p);
     if (buf.includes(0)) return null; // looks binary — can't inline as text
     let text = buf.toString("utf8");
@@ -332,7 +333,11 @@ function applyAttachmentsToPriestessMessages(messages) {
       if (uri) imageParts.push({ type: "image_url", image_url: { url: uri } });
     } else {
       const content = readTextFileForInline(p);
-      if (content != null) inlined += `\n\n【附件 ${path.basename(p)}】\n${content}`;
+      if (content != null) {
+        inlined += `\n\n【附件 ${path.basename(p)}】\n${content}`;
+      } else {
+        inlined += `\n\n【附件 ${path.basename(p)}】\n（无法内联——可能是二进制文件或过大，路径：${p}）`;
+      }
     }
   }
   if (imageParts.length) {
