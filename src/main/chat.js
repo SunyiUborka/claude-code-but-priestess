@@ -224,13 +224,13 @@ function codexAttachmentArgs() {
   return args;
 }
 
-// Claude has no image flag — it reads attached images with its Read tool, which
-// outside agent mode is sandboxed to the cwd. Grant each image's parent dir so
-// Read can reach images dropped from elsewhere (Desktop etc.); without this,
-// non-agent turns answer "no photo". Text files are inlined, so only images.
+// Claude reads attached files with its Read tool, which outside agent mode is
+// sandboxed to the cwd. Grant every attachment's parent dir so Read can reach
+// files dropped from elsewhere (Desktop/Downloads etc.) — both images and any
+// non-image file that was too large/binary to inline.
 function attachmentDirArgs() {
   const dirs = new Set();
-  for (const p of pendingAttachments) if (isImagePath(p)) dirs.add(path.dirname(p));
+  for (const p of pendingAttachments) dirs.add(path.dirname(p));
   const args = [];
   for (const d of dirs) args.push("--add-dir", d);
   return args;
