@@ -986,6 +986,7 @@ const MENU_TEXT = {
     language: "语言",
     languageSystem: "跟随系统",
     languageZh: "简体中文",
+    languageJa: "日本語",
     languageEn: "English",
     system: "跟随系统",
     light: "浅色",
@@ -1052,6 +1053,7 @@ const MENU_TEXT = {
     language: "Language",
     languageSystem: "System",
     languageZh: "简体中文",
+    languageJa: "日本語",
     languageEn: "English",
     system: "System",
     light: "Light",
@@ -1109,20 +1111,90 @@ const MENU_TEXT = {
     restartUpdate: (version) => `Restart to update (v${version})`,
     downloadUpdate: (version) => `Download update (v${version})…`,
     quit: "Quit"
+  },
+  ja: {
+    openChat: "チャットを開く",
+    appearance: "外観",
+    language: "言語",
+    languageSystem: "システムに従う",
+    languageZh: "简体中文",
+    languageJa: "日本語",
+    languageEn: "English",
+    system: "システムに従う",
+    light: "ライト",
+    dark: "ダーク",
+    theme: "テーマ",
+    themeSystem: "システムに従う",
+    themeLight: "ライト",
+    themeDark: "ダーク",
+    skills: "スキルを許可（音楽・検索・アプリ）",
+    agentMode: "Agent mode（画面全体を操作）",
+    enableAgentTitle: "Agent mode を有効にしますか？",
+    enableAgent: "Agent mode を有効にする",
+    cancel: "キャンセル",
+    waifuMode: "妻モード（お世話＋観察日誌）",
+    enableWaifuTitle: "妻モードを有効にしますか？",
+    enableWaifu: "妻モードを有効にする",
+    outfit: "衣装",
+    outfitFormal: "正装（デフォルト）",
+    outfitCasual: "カジュアル（白いワンピース）",
+    desktopPet: "待機中にデスクトップペットを表示",
+    showDesktopPet: "デスクトップペットを表示",
+    desktopPetSize: "デスクトップペットのサイズ",
+    sizeSmall: "小",
+    sizeMedium: "中",
+    sizeLarge: "大",
+    sizeXL: "特大",
+    sizeScrollHint: "ペットをスクロールして自由に拡大縮小",
+    usageNoCli: "使用バックエンド: ローカル CLI が見つかりません",
+    usageBackend: "使用バックエンド",
+    usageBackendOne: (provider) => `使用バックエンド: ${provider}`,
+    priestessSettings: "内蔵プリーシス設定…",
+    personaNotes: "補足校准…",
+    modelClaude: "モデル（Claude）",
+    modelCodex: "モデル（Codex）",
+    defaultClaude: "デフォルト（CLI/アカウント）",
+    defaultCodex: "デフォルト（CLI/config）",
+    opusAlias: "Opus（最新エイリアス）",
+    sonnetAlias: "Sonnet（最新エイリアス）",
+    haikuAlias: "Haiku（最新エイリアス）",
+    currentCustom: (model) => `現在のカスタム: ${model}`,
+    coauthorCommits: "Git コミットにプリーシスを共著者として追加",
+    autoScreenshot: "毎ターン自動スクリーンショット",
+    picFolder: "写真フォルダを開く…",
+    openPicFolder: "写真フォルダを開く（~/Pictures/PRTS-photo/）",
+    setChatDirectory: "チャット作業ディレクトリを設定…",
+    chooseProjectFolder: "チャットで使用するプロジェクトフォルダを選択",
+    clearChatDirectory: "チャット作業ディレクトリをクリア",
+    restartPriestess: "プルーシスを再起動",
+    revealDataFolder: "データフォルダを開く",
+    credits: "制作者リスト…",
+    checkUpdates: "アップデートを確認…",
+    downloadInstallUpdate: (version) => `v${version} をダウンロードしてインストール…`,
+    restartUpdate: (version) => `再起動して更新（v${version}）`,
+    downloadUpdate: (version) => `アップデートをダウンロード（v${version}）…`,
+    quit: "終了"
   }
 };
 
 function menuLanguage() {
   const selected = String(settings.get("menuLanguage") || "system").toLowerCase();
-  if (selected === "zh" || selected === "en") return selected;
+  if (selected === "zh" || selected === "ja" || selected === "en") return selected;
   try {
     const preferred = app.getPreferredSystemLanguages?.() || [];
-    if (preferred[0]) return /^zh\b/i.test(String(preferred[0])) ? "zh" : "en";
+    if (preferred[0]) {
+      const lang = String(preferred[0]);
+      if (/^zh\b/i.test(lang)) return "zh";
+      if (/^ja\b/i.test(lang)) return "ja";
+      return "en";
+    }
   } catch {
     /* ignore */
   }
   try {
-    return /^zh\b/i.test(String(app.getLocale() || "")) ? "zh" : "en";
+    const locale = app.getLocale() || "";
+    if (/^zh\b/i.test(locale)) return "zh";
+    if (/^ja\b/i.test(locale)) return "ja";
   } catch {
     /* ignore */
   }
@@ -1177,7 +1249,7 @@ function setTheme(value) {
 }
 
 function setMenuLanguage(value) {
-  const next = value === "zh" || value === "en" ? value : "system";
+  const next = value === "zh" || value === "ja" || value === "en" ? value : "system";
   settings.set({ menuLanguage: next });
 }
 
@@ -1493,6 +1565,12 @@ function buildContextMenu() {
           type: "radio",
           checked: all.menuLanguage === "zh",
           click: () => setMenuLanguage("zh")
+        },
+        {
+          label: mt("languageJa"),
+          type: "radio",
+          checked: all.menuLanguage === "ja",
+          click: () => setMenuLanguage("ja")
         },
         {
           label: mt("languageEn"),
