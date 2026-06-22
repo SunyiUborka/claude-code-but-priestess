@@ -13,16 +13,6 @@ const skills = require("./skills");
 const priestessProvider = require("./priestess-provider");
 const { spawnCli, spawnCliSync } = require("./cli-spawn");
 
-// ── 平台会话检测 ──────────────────────────────────────────────
-function getSessionType() {
-  const st = process.env.XDG_SESSION_TYPE;
-  if (st === "wayland" || st === "x11") return st;
-  if (process.env.WAYLAND_DISPLAY) return "wayland";
-  return "unknown";
-}
-function isWayland() { return getSessionType() === "wayland"; }
-function isX11() { return getSessionType() === "x11"; }
-
 const PROVIDERS = Object.freeze({
   CLAUDE: "claude",
   CODEX: "codex",
@@ -122,6 +112,16 @@ let sawSilentDirective = false;
 // no tool pills, no streaming. A proactive reply only surfaces if she chose
 // to speak (no [[silent]] and real text). null | "proactive" | "maintenance".
 let silentTurnKind = null;
+// Mirrors the chat window's current 普猫猫 visual state (set by main.js when the
+// pet→chat transition rolls it). Kept here so the persona prompt can match what
+// the Doctor sees. Ephemeral; never persisted.
+let chatCatMode = { cat: false, mood: "normal" };
+
+function setChatCatMode(mode) {
+  chatCatMode = mode && mode.cat
+    ? { cat: true, mood: mode.mood === "crying" ? "crying" : "normal" }
+    : { cat: false, mood: "normal" };
+}
 
 function normalizeProvider(provider) {
   if (provider === PROVIDERS.CODEX) return PROVIDERS.CODEX;
@@ -165,13 +165,34 @@ function pathEnvDirs() {
 function commonBinDirs() {
   const home = os.homedir();
   if (process.platform === "win32") {
-    return unique([
-      process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "OpenAI", "Codex", "bin"),
-      path.join(home, "AppData", "Local", "Programs", "OpenAI", "Codex", "bin"),
+    const appData = process.env.APPDATA || path.join(home, "AppData", "Roaming");
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    const programData = process.env.ProgramData || "C:\\ProgramData";
+    const programRoots = unique([
       process.env.ProgramFiles,
+      process.env.ProgramW6432,
       process.env["ProgramFiles(x86)"],
+      "C:\\Program Files",
+      "C:\\Program Files (x86)"
+    ]);
+    return unique([
+      appData && path.join(appData, "npm"),
+      localAppData && path.join(localAppData, "Programs"),
+      localAppData && path.join(localAppData, "Programs", "OpenAI", "Codex", "bin"),
+      localAppData && path.join(localAppData, "pnpm"),
+      localAppData && path.join(localAppData, "Yarn", "bin"),
+      localAppData && path.join(localAppData, "Volta", "bin"),
+      path.join(home, "scoop", "shims"),
+      path.join(home, ".volta", "bin"),
+      path.join(home, "AppData", "Local", "Programs", "OpenAI", "Codex", "bin"),
+      programData && path.join(programData, "chocolatey", "bin"),
+      process.env.NPM_CONFIG_PREFIX,
+      ...programRoots,
+      ...programRoots.flatMap((root) => [
+        path.join(root, "nodejs"),
+        path.join(root, "nodejs", "node_global"),
+        path.join(root, "nodejs", "node_modules", ".bin")
+      ]),
       path.join(home, ".local", "bin"),
       path.join(home, ".codex", "bin"),
       path.join(home, ".claude", "local")
@@ -184,9 +205,6 @@ function commonBinDirs() {
     path.join(home, ".deno", "bin"),
     path.join(home, ".codex", "bin"),
     path.join(home, ".claude", "local"),
-    "/home/linuxbrew/.linuxbrew/bin",
-    "/snap/bin",
-    "/var/lib/flatpak/exports/bin",
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
@@ -251,9 +269,11 @@ function canAccessExecutable(candidate) {
 
 function canSpawnExecutable(candidate) {
   try {
-    // 超时是上限，不是等待时间——正常的 CLI 在 50-400ms 内返回 --version。
-    // 5s 只为极端情况预留：macOS 首次执行刚自更新的 claude（~220MB 包，几乎每日发布）
-    // 会进行深度扫描，旧上限经常导致误判 CLI 不可用。
+    // The timeout is a ceiling, not a wait — a healthy CLI answers --version
+    // in 50-400ms and we return immediately. 5s (formerly 1.8s on mac) only
+    // matters for a genuinely slow binary: macOS deep-scans the first exec of
+    // a freshly self-updated claude (a ~220MB bundle, shipped near-daily),
+    // which regularly blew the old ceiling and made a working CLI look gone.
     const probe = spawnCliSync(candidate, ["--version"], {
       env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
       stdio: "ignore",
@@ -1714,7 +1734,9 @@ function notifyScreenPermissionOnce() {
   if (screenNoticeShown) return;
   screenNoticeShown = true;
   pushSystem(
-    "（我暂时看不到屏幕。已替博士打开「屏幕录制」设置——勾选 PRTS 后，从托盘菜单点「Restart Priestess」让我重启一次即可生效。这次起我不会再反复弹窗打扰博士。）"
+    "（我暂时看不到屏幕。已替博士打开「屏幕录制」设置。\n" +
+      "若列表里已经有「PRTS」却仍不生效——多半是刚更新过：PRTS 未签名，每次更新签名都会变，旧授权就失效了。\n" +
+      "请把旧的「PRTS」选中、点「−」删掉，再点「+」重新添加 /Applications/PRTS.app，然后从托盘点「Restart Priestess」让我重启一次即可。这次起我不会再反复弹窗打扰博士。）"
   );
   if (process.platform === "darwin") {
     // Jump straight to the Screen Recording pane so the Doctor doesn't have to
@@ -1765,127 +1787,6 @@ function captureWithScreencapture(out) {
   }
 }
 
-function captureWithGrim(out) {
-  if (process.platform !== "linux") return false;
-  if (!isWayland()) return false; // grim 只在 wlroots Wayland 下有效
-  try {
-    const probe = spawnSync("which", ["grim"], { stdio: "ignore", timeout: 1000 });
-    if (probe.status !== 0) return false;
-  } catch {
-    return false;
-  }
-  try {
-    const result = spawnSync("grim", [out], {
-      stdio: "ignore",
-      timeout: 3500
-    });
-    return (
-      result.status === 0 &&
-      fs.existsSync(out) &&
-      fs.statSync(out).size > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-// Wayland 截图工具：gnome-screenshot（GNOME）、spectacle（KDE）
-// grim 缺失时作为补充，避免直接落到 desktopCapturer 弹 portal 对话框
-function captureWithGnomeScreenshot(out) {
-  if (process.platform !== "linux") return false;
-  try {
-    const probe = spawnSync("which", ["gnome-screenshot"], { stdio: "ignore", timeout: 1000 });
-    if (probe.status !== 0) return false;
-  } catch {
-    return false;
-  }
-  try {
-    const result = spawnSync("gnome-screenshot", ["-f", out], {
-      stdio: "ignore",
-      timeout: 5000
-    });
-    return (
-      result.status === 0 &&
-      fs.existsSync(out) &&
-      fs.statSync(out).size > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-function captureWithSpectacle(out) {
-  if (process.platform !== "linux") return false;
-  try {
-    const probe = spawnSync("which", ["spectacle"], { stdio: "ignore", timeout: 1000 });
-    if (probe.status !== 0) return false;
-  } catch {
-    return false;
-  }
-  try {
-    const result = spawnSync("spectacle", ["-b", "-n", "-o", out], {
-      stdio: "ignore",
-      timeout: 5000
-    });
-    return (
-      result.status === 0 &&
-      fs.existsSync(out) &&
-      fs.statSync(out).size > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-// X11 截图工具：maim（轻量）、ImageMagick import（广泛安装）
-function captureWithMaim(out) {
-  if (process.platform !== "linux") return false;
-  if (!isX11()) return false;
-  try {
-    const probe = spawnSync("which", ["maim"], { stdio: "ignore", timeout: 1000 });
-    if (probe.status !== 0) return false;
-  } catch {
-    return false;
-  }
-  try {
-    const result = spawnSync("maim", [out], {
-      stdio: "ignore",
-      timeout: 3500
-    });
-    return (
-      result.status === 0 &&
-      fs.existsSync(out) &&
-      fs.statSync(out).size > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-function captureWithImport(out) {
-  if (process.platform !== "linux") return false;
-  if (!isX11()) return false;
-  try {
-    const probe = spawnSync("which", ["import"], { stdio: "ignore", timeout: 1000 });
-    if (probe.status !== 0) return false;
-  } catch {
-    return false;
-  }
-  try {
-    const result = spawnSync("import", ["-window", "root", out], {
-      stdio: "ignore",
-      timeout: 5000
-    });
-    return (
-      result.status === 0 &&
-      fs.existsSync(out) &&
-      fs.statSync(out).size > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function takeScreenshot() {
   if (process.platform === "darwin" && screenCaptureBlocked) return null;
 
@@ -1910,23 +1811,6 @@ async function takeScreenshot() {
     if (captureWithScreencapture(out)) {
       return out;
     }
-
-    // Linux path: probe the best available screenshot tool based on session type,
-    // avoiding the Electron desktopCapturer portal permission dialog whenever possible.
-    //   Wayland: grim (wlroots) → gnome-screenshot (GNOME) → spectacle (KDE) → desktopCapturer
-    //   X11:     maim → import (ImageMagick) → desktopCapturer
-    if (isWayland()) {
-      if (captureWithGrim(out)) return out;
-      if (captureWithGnomeScreenshot(out)) return out;
-      if (captureWithSpectacle(out)) return out;
-    }
-    if (isX11()) {
-      if (captureWithMaim(out)) return out;
-      if (captureWithImport(out)) return out;
-    }
-    // Session type unknown — try grim (most common on modern Linux) then maim
-    if (captureWithGrim(out)) return out;
-    if (captureWithMaim(out)) return out;
 
     if (process.platform !== "darwin") {
       try {
@@ -1963,7 +1847,9 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
     deepPersona: shouldUseDeepPersona(trimmed),
     observeEnabled:
       settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode),
-    personaNotes: settings.get("personaNotes") || ""
+    personaNotes: settings.get("personaNotes") || "",
+    catMode: silentTurnKind ? null : chatCatMode,
+    coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false
   });
   const promptFile = createInvocationTempFile("prts-claude-", "system-prompt.txt", systemPrompt);
   const args = [
@@ -2021,7 +1907,9 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
       deepPersona: shouldUseDeepPersona(trimmed),
       observeEnabled:
         settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode),
-      personaNotes: settings.get("personaNotes") || ""
+      personaNotes: settings.get("personaNotes") || "",
+      catMode: silentTurnKind ? null : chatCatMode,
+      coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false
     }) +
     "\n\n【博士本轮请求】\n" +
     trimmed
@@ -2092,34 +1980,12 @@ function send(text) {
   const trimmed = String(text ?? "").trim();
   if (!trimmed) return { ok: false, reason: "empty" };
 
-  // 🥚 彩蛋: 二进制暗号检测
-  if (trimmed.replace(/\s+/g, " ") === skills.EASTER_EGG_BINARY) {
-    refreshProviderAvailability();
-    const provider = activeProvider();
-    pushUser(trimmed, provider);
-    const decoded = new TextDecoder().decode(
-      new Uint8Array(skills.EASTER_EGG_BINARY.split(" ").map(b => parseInt(b, 2)))
-    );
-    history.push({
-      id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      role: "assistant",
-      text: `「${decoded}」—— 博士，你找到我了。`,
-      ts: Date.now()
-    });
-    emitHistory();
-    skills.runSkill("easter_egg", "").then((res) => {
-      if (res?.ok) pushSkillReceipt(res.receipt);
-    });
-    emitStatus("idle");
-    return { ok: true };
-  }
-
   refreshProviderAvailability();
   const provider = activeProvider();
   const providerInfo = ensureProviderAvailability()[provider];
   if (!providerInfo?.available) {
     pushSystem(
-      "未检测到 Claude Code 或 Codex CLI。请安装并登录其中任一，然后重新打开托盘菜单或再次发送消息。"
+      "No local Claude Code or Codex CLI was found. Install and authenticate one of them, then reopen the tray menu or send again."
     );
     emitStatus("idle", { error: "missing-cli" });
     return { ok: false, reason: "missing-cli" };
@@ -2250,7 +2116,8 @@ function launchPriestessTurn(trimmed) {
     memoryRecallRequested,
     skillsEnabled: settings.get("skillsEnabled") !== false,
     deepPersona: shouldUseDeepPersona(trimmed),
-    personaNotes: settings.get("personaNotes") || ""
+    personaNotes: settings.get("personaNotes") || "",
+    catMode: silentTurnKind ? null : chatCatMode
   });
 
   const finishCommon = () => {
@@ -2316,17 +2183,14 @@ async function launchProviderTurn({
   const silentTurn = Boolean(silentTurnKind);
   const proactiveCheck = silentTurnKind === "proactive";
   const autoScreenshot = agentMode && settings.get("autoScreenshot") !== false;
-  // Codex 有 -i 图片附件机制，自动截图由系统完成、文件作为图片直接送入上下文。
-  // Claude CLI 没有图片附件机制：普通对话不走自动截图（Read PNG 返回二进制乱码导致幻觉），
-  // 但 proactive check 仍需传递截图路径，因为模型没有对话上下文可以自己截。
+  // Chained turns normally skip the screenshot, but an auto-continuation needs a
+  // fresh screen so she can actually answer what she "saw". Proactive checks
+  // exist to look at the screen, so they always capture one regardless of
+  // agent mode.
   const screenshotPath =
-    provider === PROVIDERS.CODEX
-      ? (proactiveCheck || (autoScreenshot && (!chained || forceScreenshot)))
-        ? await takeScreenshot()
-        : null
-      : provider === PROVIDERS.CLAUDE && proactiveCheck
-        ? await takeScreenshot()
-        : null;
+    proactiveCheck || (autoScreenshot && (!chained || forceScreenshot))
+      ? await takeScreenshot()
+      : null;
   if (proactiveCheck && !screenshotPath) {
     // Screen access is the whole point of a proactive check — without it
     // (e.g. macOS Screen Recording not granted) skip instead of running blind.
@@ -2354,7 +2218,7 @@ async function launchProviderTurn({
     turnLaunching = false;
     proc = spawnCli(invocation.command, invocation.args, {
       cwd,
-      env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" }
+      env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
     });
     if (invocation.stdin != null) {
       proc.stdin.end(invocation.stdin);
@@ -2363,7 +2227,7 @@ async function launchProviderTurn({
     turnLaunching = false;
     cleanupInvocation(invocation);
     pushSystem(
-      `启动 \`${providerLabel(provider)}\` 失败: ${error.message}。请确认 CLI 已安装且在 PATH 中。`
+      `Failed to launch \`${providerLabel(provider)}\`: ${error.message}. Is the CLI installed and on PATH?`
     );
     finalizeAssistant("");
     currentProvider = null;
@@ -2387,7 +2251,7 @@ async function launchProviderTurn({
       } catch (error) {
         if (shouldIgnoreNonJsonLine(line)) continue;
         // Non-JSON line — surface as system note for transparency.
-        pushSystem(`未解析的输出: ${line.slice(0, 200)}`);
+        pushSystem(`Unparsed: ${line.slice(0, 200)}`);
       }
     }
   });
@@ -2399,7 +2263,7 @@ async function launchProviderTurn({
   proc.on("error", (error) => {
     if (currentProcess !== proc) return;
     cleanupInvocation(invocation);
-    pushSystem(`\`${providerLabel(provider)}\` 进程出错: ${error.message}`);
+    pushSystem(`\`${providerLabel(provider)}\` process error: ${error.message}`);
     finalizeAssistant("");
     currentProcess = null;
     currentProvider = null;
@@ -2508,7 +2372,7 @@ async function launchProviderTurn({
     if (code !== 0 && code !== null) {
       const stderrSummary = stderrText.slice(-400);
       pushSystem(
-        `\`${providerLabel(provider)}\` 退出码 ${code}。${stderrSummary ? "\n" + stderrSummary : ""}`
+        `\`${providerLabel(provider)}\` exited with code ${code}.${stderrSummary ? "\n" + stderrSummary : ""}`
       );
     } else if (claudeResultErrored) {
       pushSystem(
@@ -2732,5 +2596,6 @@ module.exports = {
   getSessionIds,
   isLongMemoryDormant,
   getLastTurnDurationMs,
+  setChatCatMode,
   getOutboundQueueLength: () => outboundQueue.length
 };
