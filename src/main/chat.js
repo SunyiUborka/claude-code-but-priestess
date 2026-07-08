@@ -19,7 +19,10 @@ const PROVIDERS = Object.freeze({
   // Built-in backend: PRTS speaks to an OpenAI-compatible server directly
   // (LiteLLM by default) — no local CLI required. Chat + skills + memory
   // injection work; CLI file tools and agent mode do not apply.
-  PRIESTESS: "priestess"
+  PRIESTESS: "priestess",
+  // Open Code: a local open-source CLI coding agent (opencode CLI).
+  // Similar to Claude Code — non-interactive prompt with JSON output.
+  OPENCODE: "opencode"
 });
 const SHARED_TRANSCRIPT_MAX_CHARS = 9000;
 const RECENT_TRANSCRIPT_MESSAGE_LIMIT = 24;
@@ -44,7 +47,7 @@ let quitPending = false;
 let cancelRequested = false;
 let turnLaunching = false;
 const outboundQueue = [];
-let sessionIds = { [PROVIDERS.CLAUDE]: null, [PROVIDERS.CODEX]: null };
+let sessionIds = { [PROVIDERS.CLAUDE]: null, [PROVIDERS.CODEX]: null, [PROVIDERS.OPENCODE]: null };
 let turnStartedAt = 0;
 let currentProvider = null;
 let longMemoryDormant = true;
@@ -350,6 +353,7 @@ function applyAttachmentsToPriestessMessages(messages) {
 function normalizeProvider(provider) {
   if (provider === PROVIDERS.CODEX) return PROVIDERS.CODEX;
   if (provider === PROVIDERS.PRIESTESS) return PROVIDERS.PRIESTESS;
+  if (provider === PROVIDERS.OPENCODE) return PROVIDERS.OPENCODE;
   return PROVIDERS.CLAUDE;
 }
 
@@ -361,12 +365,14 @@ function activeProvider() {
 function providerLabel(provider = activeProvider()) {
   if (provider === PROVIDERS.CODEX) return "Codex";
   if (provider === PROVIDERS.PRIESTESS) return "Priestess (built-in)";
+  if (provider === PROVIDERS.OPENCODE) return "Open Code";
   return "Claude Code";
 }
 
 function providerShortLabel(provider = activeProvider()) {
   if (provider === PROVIDERS.CODEX) return "Codex";
   if (provider === PROVIDERS.PRIESTESS) return "Priestess";
+  if (provider === PROVIDERS.OPENCODE) return "OpenCode";
   return "Claude";
 }
 
@@ -422,6 +428,7 @@ function commonBinDirs() {
       path.join(home, ".claude", "local")
     ]);
   }
+
   return unique([
     path.join(home, ".local", "bin"),
     path.join(home, ".npm-global", "bin"),
@@ -429,6 +436,19 @@ function commonBinDirs() {
     path.join(home, ".deno", "bin"),
     path.join(home, ".codex", "bin"),
     path.join(home, ".claude", "local"),
+    // NVM — scan $NVM_DIR/versions/node/*/bin/ so nvm-installed global
+    // CLIs are found even when the packaged app inherits a minimal PATH
+    ...(() => {
+      const dir = process.env.NVM_DIR || path.join(os.homedir(), ".nvm");
+      const bins = [];
+      try {
+        for (const ver of fs.readdirSync(path.join(dir, "versions", "node"))) {
+          const b = path.join(dir, "versions", "node", ver, "bin");
+          if (fs.statSync(b).isDirectory()) bins.push(b);
+        }
+      } catch { /* nvm not present */ }
+      return bins;
+    })(),
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
@@ -476,7 +496,10 @@ function executableCandidates(command) {
         ...names.map((name) => path.join(os.homedir(), ".claude", "local", name)),
         ...names.map((name) => path.join(os.homedir(), ".local", "bin", name))
       ];
-  return unique([...providerCandidates, ...binCandidates, ...pathCandidates]);
+  // PATH entries first — the user's $PATH reflects their preferred version,
+  // which may differ from a system-installed binary in commonBinDirs
+  // (e.g., /usr/bin may hold an outdated or broken version).
+  return unique([...providerCandidates, ...pathCandidates, ...binCandidates]);
 }
 
 function canAccessExecutable(candidate) {
@@ -498,8 +521,17 @@ function canSpawnExecutable(candidate) {
     // matters for a genuinely slow binary: macOS deep-scans the first exec of
     // a freshly self-updated claude (a ~220MB bundle, shipped near-daily),
     // which regularly blew the old ceiling and made a working CLI look gone.
+    // Codex is a Node.js script (#!/usr/bin/env node) — augment PATH so that
+    // `node` can be found even when the packaged app inherits a minimal PATH.
+    const env = { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" };
+    const extraPath = commonBinDirs().filter(d => { try {
+      fs.accessSync(path.join(d, "node"), fs.constants.X_OK); return true;
+    } catch { return false; }});
+    if (extraPath.length) {
+      env.PATH = [...extraPath, process.env.PATH].join(path.delimiter);
+    }
     const probe = spawnCliSync(candidate, ["--version"], {
-      env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
+      env,
       stdio: "ignore",
       timeout: 5000
     });
@@ -514,6 +546,17 @@ function detectProvider(provider, previous = null) {
   for (const candidate of executableCandidates(normalized)) {
     try {
       if (canAccessExecutable(candidate) && canSpawnExecutable(candidate)) {
+        // opencode v0.0.55 at /usr/bin is fundamentally broken (missing agent
+        // coder) — skip it so a working version from PATH (npm, etc.) is used.
+        if (provider === PROVIDERS.OPENCODE) {
+          const ver = spawnCliSync(candidate, ["--version"], {
+            encoding: "utf8",
+            timeout: 3000,
+            stdio: ["ignore", "pipe", "pipe"]
+          });
+          const verStr = (ver.stdout || "").trim() || (ver.stderr || "").trim();
+          if (verStr.startsWith("0.")) continue; // skip v0.x — all are broken
+        }
         return {
           provider: normalized,
           label: providerLabel(normalized),
@@ -531,8 +574,18 @@ function detectProvider(provider, previous = null) {
   // bundle near-daily), not uninstalled. A single missed probe used to demote
   // it and silently flip the backend; a genuinely broken CLI still surfaces
   // a visible error on the next send.
+  // Except for opencode: v0.x binaries are broken (missing agent coder) and
+  // should not be sticky.
   if (previous?.available && previous.command && canAccessExecutable(previous.command)) {
-    return { ...previous };
+    if (provider !== PROVIDERS.OPENCODE) return { ...previous };
+    // For opencode, verify the previous command is a working version
+    try {
+      const ver = spawnCliSync(previous.command, ["--version"], {
+        encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "pipe"]
+      });
+      const verStr = (ver.stdout || "").trim() || (ver.stderr || "").trim();
+      if (!verStr.startsWith("0.")) return { ...previous };
+    } catch { /* skip */ }
   }
   return {
     provider: normalized,
@@ -563,7 +616,8 @@ function scanProviderAvailability() {
   return {
     [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE, previous?.[PROVIDERS.CLAUDE]),
     [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX, previous?.[PROVIDERS.CODEX]),
-    [PROVIDERS.PRIESTESS]: detectPriestessProvider()
+    [PROVIDERS.PRIESTESS]: detectPriestessProvider(),
+    [PROVIDERS.OPENCODE]: detectProvider(PROVIDERS.OPENCODE, previous?.[PROVIDERS.OPENCODE])
   };
 }
 
@@ -586,7 +640,8 @@ function emptyProviderAvailability() {
   return {
     [PROVIDERS.CLAUDE]: empty(PROVIDERS.CLAUDE),
     [PROVIDERS.CODEX]: empty(PROVIDERS.CODEX),
-    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS)
+    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS),
+    [PROVIDERS.OPENCODE]: empty(PROVIDERS.OPENCODE)
   };
 }
 
@@ -596,6 +651,7 @@ function selectAvailableProvider(requested, availability = ensureProviderAvailab
   if (availability[PROVIDERS.CODEX]?.available) return PROVIDERS.CODEX;
   if (availability[PROVIDERS.CLAUDE]?.available) return PROVIDERS.CLAUDE;
   if (availability[PROVIDERS.PRIESTESS]?.available) return PROVIDERS.PRIESTESS;
+  if (availability[PROVIDERS.OPENCODE]?.available) return PROVIDERS.OPENCODE;
   return null;
 }
 
@@ -609,7 +665,7 @@ let providerAvailabilityScannedAt = 0;
 
 function anyCliAvailable(availability) {
   return Boolean(
-    availability?.[PROVIDERS.CLAUDE]?.available || availability?.[PROVIDERS.CODEX]?.available
+    availability?.[PROVIDERS.CLAUDE]?.available || availability?.[PROVIDERS.CODEX]?.available || availability?.[PROVIDERS.OPENCODE]?.available
   );
 }
 
@@ -640,7 +696,7 @@ function getProviderAvailability(options = {}) {
   const availability = options.refresh === false
     ? providerAvailability || emptyProviderAvailability()
     : ensureProviderAvailability();
-  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS]
+  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS, PROVIDERS.OPENCODE]
     .filter((provider) => availability[provider]?.available);
   const active = selectAvailableProvider(settings.get("chatProvider"), availability);
   return {
@@ -649,7 +705,8 @@ function getProviderAvailability(options = {}) {
     providers: {
       [PROVIDERS.CLAUDE]: { ...availability[PROVIDERS.CLAUDE] },
       [PROVIDERS.CODEX]: { ...availability[PROVIDERS.CODEX] },
-      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) }
+      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) },
+      [PROVIDERS.OPENCODE]: { ...(availability[PROVIDERS.OPENCODE] || { provider: PROVIDERS.OPENCODE, label: providerLabel(PROVIDERS.OPENCODE), shortLabel: providerShortLabel(PROVIDERS.OPENCODE), available: false, command: null }) }
     }
   };
 }
@@ -1988,9 +2045,40 @@ function handleCodexStreamEvent(event) {
   }
 }
 
+function extractOpenCodeText(event) {
+  if (!event || typeof event !== "object") return "";
+  // opencode --format json event types:
+  //   {"type":"text","part":{"type":"text","text":"...",...}}
+  //   {"type":"step_start",...}
+  //   {"type":"step_finish",...}
+  if (event.type === "text" && event.part && typeof event.part.text === "string") {
+    return event.part.text;
+  }
+  // Fallback: try common fields
+  if (typeof event.text === "string") return event.text;
+  if (typeof event.content === "string") return event.content;
+  if (typeof event.message === "string") return event.message;
+  if (typeof event.output === "string") return event.output;
+  return "";
+}
+
+function handleOpenCodeStreamEvent(event) {
+  if (!event || typeof event !== "object") return;
+  if (event.type === "step_start" && event.sessionID) {
+    rememberProviderSession(PROVIDERS.OPENCODE, event.sessionID);
+    return;
+  }
+  const text = extractOpenCodeText(event);
+  if (text) {
+    appendReconciledAssistantText(text);
+  }
+}
+
 function handleProviderStreamEvent(provider, event) {
   if (provider === PROVIDERS.CODEX) {
     handleCodexStreamEvent(event);
+  } else if (provider === PROVIDERS.OPENCODE) {
+    handleOpenCodeStreamEvent(event);
   } else {
     handleClaudeStreamEvent(event);
   }
@@ -2067,6 +2155,52 @@ function captureWithScreencapture(out) {
   }
 }
 
+// ── Linux screenshot tools ─────────────────────────────────────
+// Different distros/DEs ship different screenshot utilities. Try
+// them in order of preference based on what's actually installed.
+// Returns an ordered list of [command, args...] candidates to try.
+function linuxScreenshotCandidates() {
+  const candidates = [];
+  const desktop = (process.env.XDG_CURRENT_DESKTOP || "").toLowerCase();
+
+  // DE-native tool (preferred)
+  if (desktop.includes("kde")) {
+    candidates.push(["spectacle", "-b", "-n", "-o"]);
+  } else if (desktop.includes("gnome") || desktop.includes("unity") || desktop.includes("pantheon")) {
+    candidates.push(["gnome-screenshot", "-f"]);
+  }
+
+  // Wayland tools (wlroots-based: Sway, Hyprland, Niri)
+  if (process.env.XDG_SESSION_TYPE === "wayland") {
+    candidates.push(["grim"]);           // grim full-screen
+  }
+
+  // X11 tools (fallback on both X11 and Wayland)
+  candidates.push(["import", "-window", "root"]);  // ImageMagick
+  candidates.push(["maim"]);                        // maim
+  candidates.push(["scrot", "-z"]);                 // scrot -z: be silent
+
+  return candidates;
+}
+
+function captureWithLinuxTool(out) {
+  for (const [cmd, ...args] of linuxScreenshotCandidates()) {
+    try {
+      const result = spawnSync(cmd, [...args, out], {
+        stdio: "ignore",
+        timeout: 5000,
+        encoding: "utf8"
+      });
+      if (result.status === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 async function takeScreenshot() {
   if (process.platform === "darwin" && screenCaptureBlocked) return null;
 
@@ -2085,11 +2219,14 @@ async function takeScreenshot() {
     }
     const out = path.join(dir, `screen-${Date.now()}.png`);
 
-    // macOS path: use the same stable system screencapture route users already
-    // trust from terminal/Claude workflows, then attach the file to Codex via
-    // `-i`. Electron capture is only a fallback.
+    // macOS path
     if (captureWithScreencapture(out)) {
       return out;
+    }
+
+    // Linux: try native screenshot tools (grim, spectacle, gnome-screenshot, maim, scrot, import)
+    if (process.platform === "linux") {
+      if (captureWithLinuxTool(out)) return out;
     }
 
     if (process.platform !== "darwin") {
@@ -2268,6 +2405,53 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
   };
 }
 
+function buildOpenCodePrompt(trimmed, sharedTranscript) {
+  const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
+  const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
+  return (
+    persona.buildPersonaPrompt({
+      agentMode: false,
+      screenshotPath: null,
+      provider: PROVIDERS.OPENCODE,
+      sharedTranscript,
+      includeLongMemory,
+      memoryRecallRequested,
+      skillsEnabled: settings.get("skillsEnabled") !== false,
+      deepPersona: shouldUseDeepPersona(trimmed),
+      observeEnabled: false,
+      personaNotes: settings.get("personaNotes") || "",
+      catMode: silentTurnKind ? null : chatCatMode,
+      coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false,
+      attachments: silentTurnKind ? [] : pendingAttachments
+    }) +
+    "\n\n【博士本轮请求】\n" +
+    trimmed
+  );
+}
+
+function buildOpenCodeInvocation(trimmed, cwd, sharedTranscript, sessionPlan) {
+  const prompt = buildOpenCodePrompt(trimmed, sharedTranscript);
+  // 完全模仿 Codex：opencode run --format json - 从 stdin 读提示词
+  // 不传截图（opencode 模型不支持多模态）
+  const args = ["run", "--format", "json"];
+  const opencodeModel = String(settings.get("opencodeModel") || "").trim();
+  if (opencodeModel) {
+    args.push("--model", opencodeModel);
+  }
+  if (cwd) {
+    args.push("--dir", cwd);
+  }
+  args.push("-");
+
+  return {
+    command: resolveExecutable("opencode"),
+    args,
+    stdin: prompt,
+    cleanupDirs: [],
+    resumed: false
+  };
+}
+
 function buildProviderInvocation(
   provider,
   trimmed,
@@ -2279,6 +2463,9 @@ function buildProviderInvocation(
 ) {
   if (provider === PROVIDERS.CODEX) {
     return buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTranscript, sessionPlan);
+  }
+  if (provider === PROVIDERS.OPENCODE) {
+    return buildOpenCodeInvocation(trimmed, cwd, sharedTranscript, sessionPlan);
   }
   return buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscript, sessionPlan);
 }
@@ -2554,11 +2741,13 @@ async function launchProviderTurn({
   // fresh screen so she can actually answer what she "saw". Proactive checks
   // exist to look at the screen, so they always capture one regardless of
   // agent mode.
+  // opencode 不支持多模态，跳过截图
   const screenshotPath =
+    provider === PROVIDERS.OPENCODE ? null :
     proactiveCheck || (autoScreenshot && (!chained || forceScreenshot))
       ? await takeScreenshot()
       : null;
-  if (proactiveCheck && !screenshotPath) {
+  if (proactiveCheck && !screenshotPath && provider !== PROVIDERS.OPENCODE) {
     // Screen access is the whole point of a proactive check — without it
     // (e.g. macOS Screen Recording not granted) skip instead of running blind.
     turnLaunching = false;
@@ -2584,9 +2773,18 @@ async function launchProviderTurn({
   let proc;
   try {
     turnLaunching = false;
+    // Augment PATH so Node.js-based CLIs (codex, etc.) can find `node`
+    // when the packaged app inherits a minimal PATH.
+    const spawnEnv = { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" };
+    const nodeDirs = commonBinDirs().filter(d => { try {
+      fs.accessSync(path.join(d, "node"), fs.constants.X_OK); return true;
+    } catch { return false; }});
+    if (nodeDirs.length) {
+      spawnEnv.PATH = [...nodeDirs, process.env.PATH].join(path.delimiter);
+    }
     proc = spawnCli(invocation.command, invocation.args, {
       cwd,
-      env: { ...process.env, CLAUDE_CODE_NONINTERACTIVE: "1" },
+      env: spawnEnv,
     });
     if (invocation.stdin != null) {
       proc.stdin.end(invocation.stdin);

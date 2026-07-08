@@ -8,12 +8,33 @@ body {
   user-select: none;
 }
 
+#petDragHandle {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  z-index: 2;
+  cursor: grab;
+  /* Invisible by default. KDE .native-drag makes it draggable. */
+}
+
+body.native-drag #petDragHandle {
+  -webkit-app-region: drag;
+}
+
+#petWrapper {
+  position: fixed;
+  inset: 0;
+}
+
 #petCanvas {
   display: block;
   width: 100%;
   height: 100%;
   cursor: grab;
   filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.38));
+  transform-origin: 50% 100%;
 }
 
 body.is-dragging #petCanvas {

@@ -29,20 +29,16 @@ Linux システムトレイコンパニオンアプリです。キャラクタ�
   </a>
   &nbsp;
   <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/badge/ダウンロード-Linux%20(AppImage%20%7C%20deb)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
+    <img src="https://img.shields.io/badge/ダウンロード-Linux%20(AppImage%20%7C%20deb%20%7C%20rpm)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
   </a>
-</p>
-
-<p align="center">
+  &nbsp;
   <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/github/v/release/aklnaaw/priestess-arknights?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
-  </a>
-  <a href="https://github.com/aklnaaw/priestess-arknights/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/priestess-arknights/ci.yml?style=flat-square&label=CI" alt="CI status">
+    <img src="https://img.shields.io/badge/Fedora-rpm-294172?style=for-the-badge&logo=fedora&logoColor=white" alt="RPM for Fedora">
   </a>
 </p>
 
-> **Linux 専用** です。このフォークは GitHub Releases で **AppImage と deb のみ** を提供します。
+
+> **Linux 専用** です。GitHub Releases で **AppImage / deb / rpm** を提供します。
 > macOS / Windows 版は上流リポジトリをご覧ください。
 >
 > **Arch Linux ユーザーですか？** AUR からインストール: `yay -S priestess-arknights`
@@ -58,7 +54,8 @@ Linux システムトレイコンパニオンアプリです。キャラクタ�
 | あなたは… | これをダウンロード | 他に必要なもの |
 | --- | --- | --- |
 | Arch Linux ユーザー（推奨） | `yay -S priestess-arknights` または `paru -S priestess-arknights` | — |
-| その他の Linux ディストリビューション | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（ポータブル）または [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | ローカルにインストール・認証済みの `claude` / `codex` CLI、または内蔵 Priestess API バックエンドの設定 |
+| その他の Linux ディストリビューション | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（ポータブル） | ローカルにインストール・認証済みの `claude` / `codex` CLI、または内蔵 Priestess API バックエンドの設定 |
+| Fedora / RHEL / openSUSE | [`priestess-arknights-*.x86_64.rpm`](https://github.com/aklnaaw/priestess-arknights/releases/latest) | `sudo dnf install ./priestess-arknights-*.rpm` |
 | 開発者 | クローンして `npm install && npm run dev` | Node + npm |
 
 ## 機能
@@ -115,7 +112,7 @@ Linux システムトレイコンパニオンアプリです。キャラクタ�
 
 ## ダウンロードとインストール（一般ユーザー向け）
 
-このリポジトリは GitHub Releases で **AppImage と deb のみ** を提供します。
+このリポジトリは GitHub Releases で **AppImage / deb / rpm** を提供します。
 
 ### Arch Linux（AUR — 推奨）
 
@@ -147,6 +144,7 @@ PRTS_SHOW_ON_START=1 priestess
 |------|---------|--------------------------|
 | **AppImage** | `priestess-arknights-*.AppImage` | 全 Linux、ポータブル |
 | **deb** | `priestess-arknights_*_amd64.deb` | Debian / Ubuntu / 派生ディストリ |
+| **rpm** | `priestess-arknights-*.x86_64.rpm` | Fedora / RHEL / openSUSE |
 
 ```sh
 # AppImage: ダウンロードして実行するだけ
@@ -156,6 +154,10 @@ chmod +x priestess-arknights-*.AppImage
 # deb: dpkg でインストール
 sudo dpkg -i priestess-arknights_*_amd64.deb
 priestess
+
+# rpm: dnf または rpm でインストール
+sudo dnf install ./priestess-arknights-*.x86_64.rpm
+priestess
 ```
 
 Wayland でトレイが表示されない場合、環境変数を指定：
@@ -164,7 +166,6 @@ Wayland でトレイが表示されない場合、環境変数を指定：
 PRTS_SHOW_ON_START=1 ./priestess-arknights-*.AppImage
 ```
 
-> **GitHub Releases で提供するのは AppImage と deb のみ** です。`.tar.gz`、`.rpm` などの形式は提供しません。
 
 **システム要件**
 
@@ -192,7 +193,7 @@ npm run dev
 
 ```sh
 npm run dist          # ホストアーキテクチャ用にビルド
-npm run dist:linux    # Linux のみ：AppImage + deb
+npm run dist:linux    # Linux のみ：AppImage + deb + rpm
 ```
 
 成果物は `dist/` に出力されます。
@@ -247,20 +248,20 @@ which codex    # PATH 上のパスが表示されれば OK
 有効にすると、定期的なスクリーンショットと 1 回のチェックあたり 1 回のモデル呼び出しを伴うため、
 最初に確認ダイアログが表示されます。
 
-> ⚠️ **既知の制限 — Linux では実装が困難、PR 歓迎**
+> ⚠️ **既知の制限**
 >
-> プロトコルと CLI 機能の制約により、老婆モードは Linux で深刻な制限があります：
+> | バックエンド | 老婆モード | 備考 |
+> |-------------|-----------|------|
+> | **Codex CLI** | ✅ 動作 | スクリーンショットは `-i` 経由で渡され、マルチモーダルモデルが画面を認識可能 |
+> | **Claude Code** | ⚠️ 制限あり | `claude -p` の Read ツールはマルチモーダルをサポートせず、スクリーンショットを渡せない |
+> | **Open Code** | ❌ 不可 | テキストのみのモデル、スクリーンショット非対応 |
 >
-> - **Claude Code バックエンドは使用不可。** `claude -p` モードはマルチモーダル入力を
->   サポートしておらず、`Read` ツールは `[Unsupported Image]` を返すため、
->   モデルがスクリーンショットを認識できません。Claude Code では老婆モードは
->   実質的に半死状態です。
-> - **CodeX は正常に動作します。** CodeX バックエンドを使用している場合は問題なく使えます。
-> - **Linux でのスクリーンショット取得は困難です。** Linux デスクトップには統一された
->   バックグラウンドスクリーンショットの仕組みがありません。Niri などの Wayland コンポジターは
->   `wlr-screencopy` プロトコルで透過的に取得できますが、GNOME/KDE/Hyprland 全体で
->   統一実装するのは非常に手間がかかります。
-> - 作者は可能な限りの対応を試みました。アイデアや解決策があれば、**PR をお待ちしています**。
+> **Linux スクリーンショットツール**は各ディストリビューションに自動対応：KDE `spectacle`、
+> GNOME `gnome-screenshot`、Wayland `grim`、X11 `import`/`maim`/`scrot`。
+> システムに対応ツールがない場合、老婆モードのスクリーンショットは失敗しますが、
+> テキストチャットには影響しません。
+>
+> Linux のスクリーンショットやマルチモーダル対応の改善案があれば、**PR をお待ちしています**。
 
 有効にすると、彼女は約 20 分おきに静かに画面を確認し、**自分で話すかどうかを判断します**：
 

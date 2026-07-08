@@ -28,20 +28,16 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
   </a>
   &nbsp;
   <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Linux%20(AppImage%20%7C%20deb)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
+    <img src="https://img.shields.io/badge/Download-Linux%20(AppImage%20%7C%20deb%20%7C%20rpm)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
   </a>
-</p>
-
-<p align="center">
+  &nbsp;
   <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/github/v/release/aklnaaw/priestess-arknights?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
-  </a>
-  <a href="https://github.com/aklnaaw/priestess-arknights/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/priestess-arknights/ci.yml?style=flat-square&label=CI" alt="CI status">
+    <img src="https://img.shields.io/badge/Fedora-rpm-294172?style=for-the-badge&logo=fedora&logoColor=white" alt="RPM for Fedora">
   </a>
 </p>
 
-> **Linux only.** This fork ships **only AppImage and deb** in GitHub Releases.
+
+> **Linux only.** Ships AppImage / deb / rpm in GitHub Releases.
 > See upstream for macOS / Windows versions.
 >
 > **Arch Linux?** Install from AUR: `yay -S priestess-arknights`
@@ -57,7 +53,9 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 | You are… | Download this | You also need |
 | --- | --- | --- |
 | Arch Linux user (recommended) | `yay -S priestess-arknights` or `paru -S priestess-arknights` | — |
-| Other Linux distros | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (portable) or [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (Debian/Ubuntu) | A local, authenticated `claude` / `codex` CLI, or configure the built-in Priestess API backend |
+| Debian / Ubuntu / Mint | [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest) | `sudo dpkg -i priestess-arknights_*.deb` |
+| Fedora / RHEL / openSUSE | [`priestess-arknights-*.x86_64.rpm`](https://github.com/aklnaaw/priestess-arknights/releases/latest) | `sudo dnf install ./priestess-arknights-*.rpm` |
+| Other Linux distros | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest) (portable) | A local, authenticated `claude` / `codex` / `opencode` CLI, or configure the built-in Priestess API backend |
 | Developer | Clone the repo, `npm install && npm run dev` | Node + npm |
 
 ## Features
@@ -155,7 +153,7 @@ No ordinary app window and no taskbar or Dock clutter. Just one tray icon.
 
 ## Download & install (for users)
 
-This repository provides **AppImage and deb only** in GitHub Releases.
+This repository provides **AppImage, deb, and rpm** in GitHub Releases.
 
 ### Arch Linux (AUR — recommended)
 
@@ -179,7 +177,7 @@ If the tray icon is not visible under Wayland (Niri, GNOME Wayland), use:
 PRTS_SHOW_ON_START=1 priestess
 ```
 
-### Linux (AppImage / deb)
+### Linux (AppImage / deb / rpm)
 
 Go to the [latest release](https://github.com/aklnaaw/priestess-arknights/releases/latest)
 and download:
@@ -188,6 +186,7 @@ and download:
 |--------|------|---------|
 | **AppImage** | `priestess-arknights-*.AppImage` | All Linux, portable |
 | **deb** | `priestess-arknights_*_amd64.deb` | Debian / Ubuntu / derivatives |
+| **rpm** | `priestess-arknights-*.x86_64.rpm` | Fedora / RHEL / openSUSE |
 
 ```sh
 # AppImage: just run it
@@ -196,6 +195,10 @@ chmod +x priestess-arknights-*.AppImage
 
 # deb: install with dpkg
 sudo dpkg -i priestess-arknights_*_amd64.deb
+priestess
+
+# rpm: install with dnf or rpm
+sudo dnf install ./priestess-arknights-*.x86_64.rpm
 priestess
 ```
 
@@ -289,21 +292,19 @@ Tray right-click → **"老婆模式 · Waifu mode (she looks after you)"**. Ent
 optional and off by default; enabling shows a consent dialog first, because it
 means periodic screenshots plus one model call per check.
 
-> ⚠️ **Known limitations — hard to get right on Linux, PRs welcome**
+> ⚠️ **Known limitations**
 >
-> Due to protocol and CLI capability constraints, waifu mode has significant
-> limitations on Linux:
+> | Backend | Waifu mode | Notes |
+> |---------|-----------|-------|
+> | **Codex CLI** | ✅ Works | Screenshots passed via `-i`, vision models see the screen |
+> | **Claude Code** | ⚠️ Limited | `claude -p` Read tool does not support multimodal — screenshots can't reach the model |
+> | **Open Code** | ❌ No | Text-only models, no screenshot support |
 >
-> - **Claude Code backend is NOT usable.** `claude -p` mode does not support
->   multimodal input — the `Read` tool returns `[Unsupported Image]`, the model
->   simply can't see screenshots. So waifu mode is essentially crippled when
->   using Claude Code.
-> - **CodeX works fine.** If you're using the CodeX backend, waifu mode is fully
->   functional.
-> - **Screenshot capture is difficult on Linux.** There is no universal
->   background screenshot solution across all Linux desktops. Niri and other
->   Wayland compositors could use `wlr-screencopy` for seamless capture, but
->   implementing this uniformly across GNOME / KDE / Hyprland (each with its
+> **Linux screenshot tools** are now auto-detected: KDE `spectacle`, GNOME `gnome-screenshot`,
+> Wayland `grim`, X11 `import`/`maim`/`scrot`. If your system is missing the appropriate tool,
+> waifu mode's screenshot will fail and the model won't see your screen (text chat is unaffected).
+>
+> If you have ideas for improving Linux screenshot or multimodal support, **PRs are welcome**.
 >   own protocol) is extremely involved.
 > - The author has exhausted reasonable approaches. **PRs welcome** if you have
 >   ideas or solutions.

@@ -1,3 +1,4 @@
+
 # priestess-arknights
 
 语言：**简体中文** | [English](README.en.md) | [日本語](README.ja.md)
@@ -27,18 +28,14 @@
   </a>
   &nbsp;
   <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/badge/下载-Linux%20(AppImage%20%7C%20deb)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
+    <img src="https://img.shields.io/badge/下载-Linux%20(AppImage%20%7C%20deb%20%7C%20rpm)-2a6df4?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux">
+  </a>
+  &nbsp;
+  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
+    <img src="https://img.shields.io/badge/Fedora-rpm-294172?style=for-the-badge&logo=fedora&logoColor=white" alt="RPM for Fedora">
   </a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/aklnaaw/priestess-arknights/releases/latest">
-    <img src="https://img.shields.io/github/v/release/aklnaaw/priestess-arknights?label=latest&style=flat-square&color=2a6df4" alt="Latest release">
-  </a>
-  <a href="https://github.com/aklnaaw/priestess-arknights/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/aklnaaw/priestess-arknights/ci.yml?style=flat-square&label=CI" alt="CI status">
-  </a>
-</p>
 
 > **Linux only.** 本 fork 移除了 macOS / Windows 专属逻辑，添加了 Linux 桌面兼容性修复。
 > 支持 Wayland（Niri、GNOME、KDE）和 X11 会话。
@@ -51,11 +48,13 @@
 
 ## 我该下载哪个？
 
-| 你是… | 下载这个 | 还需要什么 |
-| --- | --- | --- |
-| Arch Linux 用户（推荐） | `yay -S priestess-arknights` 或 `paru -S priestess-arknights` | — |
-| 其他 Linux 发行版 | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（解压即用）或 [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（Debian/Ubuntu） | 本机装好并登录 `claude` / `codex` CLI，或配置内置普瑞赛斯 API 后端 |
-| 开发者 / 想改代码 | 克隆源码后 `npm install && npm run dev` | Node + npm |
+| 你是…                      | 下载这个                                                                                                     | 还需要什么                                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Arch Linux 用户（推荐）        | `yay -S priestess-arknights` 或 `paru -S priestess-arknights`                                             | —                                                                                          |
+| Debian / Ubuntu / Mint   | [`priestess-arknights_*_amd64.deb`](https://github.com/aklnaaw/priestess-arknights/releases/latest)      | `sudo dpkg -i priestess-arknights_*.deb`                                                   |
+| Fedora / RHEL / openSUSE | [`priestess-arknights-*.x86_64.rpm`](https://github.com/aklnaaw/priestess-arknights/releases/latest)     | `sudo rpm -ivh priestess-arknights-*.rpm` 或 `sudo dnf install ./priestess-arknights-*.rpm` |
+| 其他 Linux 发行版             | [`priestess-arknights-*.AppImage`](https://github.com/aklnaaw/priestess-arknights/releases/latest)（解压即用） | 本机装好并登录 `claude` / `codex` / `opencode` CLI，或配置内置普瑞赛斯 API 后端                               |
+| 开发者 / 想改代码               | 克隆源码后 `npm install && npm run dev`                                                                       | Node + npm                                                                                 |
 
 ## 功能
 
@@ -96,8 +95,7 @@
 
 ## 下载安装（普通用户）
 
-本仓库 GitHub Releases **仅提供 AppImage 和 deb 两种格式**。
-> 不再提供 `.tar.gz`、`.rpm` 或其他格式。
+本仓库 GitHub Releases **提供 AppImage、deb 和 rpm 三种格式**。
 
 ### Arch Linux（AUR，推荐）
 
@@ -123,7 +121,7 @@ priestess
 PRTS_SHOW_ON_START=1 priestess
 ```
 
-### Linux（AppImage / deb）
+### Linux（AppImage / deb / rpm）
 
 前往 [最新 release](https://github.com/aklnaaw/priestess-arknights/releases/latest)
 选择对应格式下载：
@@ -132,6 +130,7 @@ PRTS_SHOW_ON_START=1 priestess
 |------|------|-----------|
 | **AppImage** | `priestess-arknights-*.AppImage` | 所有 Linux 发行版，解压即用 |
 | **deb** | `priestess-arknights_*_amd64.deb` | Debian / Ubuntu / 衍生版 |
+| **rpm** | `priestess-arknights-*.x86_64.rpm` | Fedora / RHEL / openSUSE |
 
 ```sh
 # AppImage：下载后直接运行
@@ -140,6 +139,10 @@ chmod +x priestess-arknights-*.AppImage
 
 # deb：下载后用 dpkg 安装
 sudo dpkg -i priestess-arknights_*_amd64.deb
+priestess
+
+# rpm：用 dnf 或 rpm 安装
+sudo dnf install ./priestess-arknights-*.x86_64.rpm
 priestess
 ```
 
@@ -186,35 +189,50 @@ OpenAI 兼容接口。API 地址、Key 和模型名只保存在本机 `settings.
 
 支持的后端：
 
-- Claude Code CLI：`claude`
-- Codex CLI：`codex`
-- 内置普瑞赛斯 API 后端：右键托盘菜单 → **「内置普瑞赛斯设置…」**
+- **Claude Code CLI**：`claude`（默认，功能最全）
+- **Codex CLI**：`codex`
+- **Open Code CLI**：`opencode`（纯文本，不支持图像识别）
+- **内置普瑞赛斯 API 后端**：右键托盘菜单 → **「内置普瑞赛斯设置…」**
 
 后端选择规则：
 
-- 如果本机同时有 `claude` 和 `codex`，右键菜单里可以切换；Linux 默认
-  使用 Claude Code。
-- 如果本机只有 `claude`，应用会锁定 Claude Code，不显示 Codex 选项。
-- 如果本机只有 `codex`，应用会锁定 Codex，不显示 Claude Code 选项。
-- 如果两个本地 CLI 都没有，仍可通过右键托盘菜单 → **「内置普瑞赛斯设置…」**
-  配置 OpenAI 兼容接口；未配置前，popover 顶部会显示 `No CLI`，发送按钮禁用。
+- 托盘菜单 **「使用后端」** 可自由切换所有已检测到的后端。
+- 如果本机只有一个 CLI，菜单显示该后端名称（不可切换）。
+- 如果所有 CLI 都未检测到，可通过内置普瑞赛斯后端连接任意 OpenAI 兼容 API。
 
 探测会在启动时、打开后端菜单时、发送消息前执行。它会检查当前 `PATH`、
-常见本地二进制目录，以及 VS Code / Cursor 的 OpenAI 扩展内置 Codex
+NVM 目录、常见本地二进制目录，以及 VS Code / Cursor 的 OpenAI 扩展内置 Codex
 二进制。
 
-Claude Code 需要先安装并登录：
+### 各后端对比
 
+| 特性 | Claude Code | Codex | Open Code | Priestess (built-in) |
+|---|---|---|---|---|
+| 聊天 | ✅ | ✅ | ✅ | ✅ |
+| 图像识别 | ✅ Read 工具 | ✅ `-i` | ❌ 纯文本 | 依赖模型 |
+| 截图后 Agent 模式自动截图 | ✅ | ✅ | ❌ | ❌ |
+| 文件附件 | ✅ Read 工具 | ✅ `-i` | ❌ | ✅ 内联 |
+| 工具/技能调用 | ✅ | ✅ | ❌ | ✅ 技能 |
+| 模型选择 | ✅ 菜单可配 | ✅ 菜单可配 | ✅ 菜单可配 | ✅ 输入框 |
+
+### 安装 CLI
+
+Claude Code：
 ```sh
 claude          # 第一次运行时按提示登录
 which claude    # 应该能输出路径
 ```
 
-Codex 需要先安装并登录：
-
+Codex：
 ```sh
 codex          # 第一次运行时按提示登录
 which codex    # 应该能输出路径
+```
+
+Open Code：
+```sh
+opencode --version  # 确认已安装
+# 可通过 npm 安装: npm install -g opencode-ai
 ```
 
 可以通过右键菜单 `Set chat directory…` 设置聊天工作目录，让当前后端在
@@ -225,18 +243,19 @@ which codex    # 应该能输出路径
 右键托盘 → **「老婆模式（她会自己照看你）」**。完全可选，默认关闭，开启时会先弹一个
 确认对话框，因为它意味着：定期截屏 + 每次检查消耗一次模型调用。
 
-> ⚠️ **已知限制 —— Linux 下实现困难，欢迎 PR**
+> ⚠️ **已知限制**
 >
-> 由于协议与 CLI 能力的限制，当前老婆模式在 Linux 下有严重局限：
+> | 后端 | 老婆模式 | 说明 |
+> |------|---------|------|
+> | **Codex CLI** | ✅ 正常工作 | 截图通过 `-i` 传入，模型可以看到屏幕 |
+> | **Claude Code** | ⚠️ 有限 | `claude -p` 的 Read 工具不支持多模态，截图传不进去 |
+> | **Open Code** | ❌ 不支持 | 纯文本模型，无截图能力 |
 >
-> - **Claude Code 后端不可用**（`claude -p` 模式本身不支持多模态输入，
->   `Read` 工具返回 `[Unsupported Image]`，模型根本看不到截图），
->   所以老婆模式用 Claude Code 时基本等于半残废。
-> - **CodeX 是完全正常的**，如果你在用 CodeX 后端可以正常使用。
-> - **截图实现困难**：Linux 桌面缺乏统一的全局后台截图方案。
->   Niri 等 Wayland 合成器可通过 `wlr-screencopy` 协议实现无感截屏，
->   但跨合成器（GNOME/KDE/Hyprland 各有一套）统一实现极其繁琐。
-> - 本人已尽力尝试各种方案，如果您有思路或解决方法，**欢迎提交 PR**。
+> **Linux 截图工具**已适配各发行版原生方案：KDE `spectacle`、GNOME `gnome-screenshot`、
+> Wayland `grim`、X11 `import`/`maim`/`scrot`。如果你的系统缺少对应工具，
+> 老婆模式截图会失败，模型就看不到你的屏幕（文字聊天不受影响）。
+>
+> 如果您有思路改进 Linux 截图或多模态支持，**欢迎提交 PR**。
 
 开启后，她每隔约 20 分钟悄悄看一眼屏幕，**自己决定要不要开口**：
 

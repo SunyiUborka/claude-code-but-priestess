@@ -84,6 +84,9 @@ let windowFadeTimer = null;
 let priestessSettingsWindow = null;
 let personaNotesWindow = null;
 let creditsWindow = null;
+// True while the JS drag IPC (non-KDE) is actively moving the pet, so the
+// native "move" event handler doesn't also try to persist the position.
+let desktopPetJsDragging = false;
 
 // ── 平台会话检测 ──────────────────────────────────────────────
 // 直接读取 $XDG_SESSION_TYPE 判断 Wayland / X11，
@@ -100,6 +103,15 @@ function getSessionType() {
 
 function isWayland() { return getSessionType() === "wayland"; }
 function isX11() { return getSessionType() === "x11"; }
+
+// KDE Plasma 检测 — 通过 $XDG_CURRENT_DESKTOP 判断。
+// KDE 在 Wayland 下有正常的托盘支持，tray.getBounds() 返回有效值，
+// 而 Niri / GNOME（无 AppIndicator 扩展）则返回全零。
+// 此函数用于区分 KDE 以启用 KDE 特有的窗口移动修正。
+function isKDE() {
+  const desktop = String(process.env.XDG_CURRENT_DESKTOP || "").toLowerCase();
+  return desktop.includes("kde");
+}
 
 // Contributors, ordered by first contribution. Roles are one concise line each
 // (a credits screen, not a changelog). The artist is listed last with her own
@@ -404,7 +416,8 @@ function scheduleSavePopoverSize() {
   // Windows may fire a spurious WM_SIZE during setPosition on frameless
   // windows — skip the save while a move is in flight so a transient
   // wrong size is never persisted to settings.
-  if (process.platform === 'win32' && isMovingPopover) return;
+  // KDE KWin may trigger similar resize events during setBounds moves.
+  if (isMovingPopover && (process.platform === 'win32' || (process.platform === 'linux' && isKDE()))) return;
   clearTimeout(popoverSizeSaveTimer);
   popoverSizeSaveTimer = setTimeout(() => {
     if (!popover || popover.isDestroyed()) return;
@@ -470,10 +483,10 @@ function resetMoveEndFallback() {
 function movePopoverTo(point = {}) {
   if (!popover || popover.isDestroyed()) return null;
   const bounds = popover.getBounds();
-  // On Windows, clamp and move with the authoritative size — bounds may be
-  // momentarily wrong if a spurious WM_SIZE landed mid-drag.
-  const width = (process.platform === 'win32' && popoverExpectedSize?.width) || bounds.width;
-  const height = (process.platform === 'win32' && popoverExpectedSize?.height) || bounds.height;
+  // On Windows and KDE, clamp and move with the authoritative size — bounds may
+  // be momentarily wrong if a spurious size change landed mid-drag.
+  const width = ((process.platform === 'win32' || (process.platform === 'linux' && isKDE())) && popoverExpectedSize?.width) || bounds.width;
+  const height = ((process.platform === 'win32' || (process.platform === 'linux' && isKDE())) && popoverExpectedSize?.height) || bounds.height;
   const targetX = Number(point.x);
   const targetY = Number(point.y);
   if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return null;
@@ -484,7 +497,7 @@ function movePopoverTo(point = {}) {
   const work = display.workArea;
   const x = clampNumber(targetX, work.x, work.x + work.width - width);
   const y = clampNumber(targetY, work.y, work.y + work.height - height);
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || (process.platform === 'linux' && isKDE())) {
     isMovingPopover = true;
     resetMoveEndFallback();
     popover.setBounds({ x, y, width, height }, false);
@@ -552,7 +565,7 @@ function createPopover() {
     // on a frameless Windows window can treat a long press near the border as
     // an OS resize gesture and fight the custom drag implementation.
     resizable: false,
-    movable: false,
+    movable: isKDE(), // KDE KWin 需要 movable=true 才能用 -webkit-app-region 原生拖拽
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -596,7 +609,7 @@ function createPopover() {
 
   popover.on("resize", () => {
     if (
-      process.platform === "win32" &&
+      (process.platform === "win32" || (process.platform === "linux" && isKDE())) &&
       popoverExpectedSize &&
       popover &&
       !popover.isDestroyed()
@@ -606,8 +619,8 @@ function createPopover() {
         bounds.width !== popoverExpectedSize.width ||
         bounds.height !== popoverExpectedSize.height
       ) {
-        // Spurious WM_SIZE (header press/drag on high-DPI) — restore the
-        // authoritative size instead of letting the shrink stick or be saved.
+        // Spurious resize (WM_SIZE on Windows / KWin setBounds reaction on KDE)
+        // — restore the authoritative size instead of letting the shrink stick.
         popover.setBounds({ x: bounds.x, y: bounds.y, ...popoverExpectedSize }, false);
         return;
       }
@@ -631,11 +644,12 @@ function positionPopover() {
   const winBounds = popover.getBounds();
   // Center the popover beside the tray icon. Windows commonly puts the tray
   // at the bottom of the screen, while macOS puts it at the top.
-  // On Wayland (Niri, GNOME, KDE) tray.getBounds() may return all zeros;
-  // fall back to top-right of the primary display.
-  // We now explicitly check $XDG_SESSION_TYPE rather than relying solely on
+  // On Wayland (Niri, GNOME) tray.getBounds() may return all zeros; fall
+  // back to top-right of the primary display.  KDE KWin exposes a working
+  // tray even under Wayland, so allow valid bounds when isKDE().
+  // We explicitly check $XDG_SESSION_TYPE rather than relying solely on
   // the all-zero heuristic, which can also trigger on broken X11 trays.
-  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0 && !isWayland();
+  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0 && (!isWayland() || isKDE());
   let x, y;
   if (hasValidBounds) {
     x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2);
@@ -724,7 +738,7 @@ function createDesktopPet() {
     show: false,
     frame: false,
     resizable: false,
-    movable: false,
+    movable: isKDE(), // KDE KWin 需要 movable=true 才能用 -webkit-app-region 原生拖拽
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -743,6 +757,18 @@ function createDesktopPet() {
   });
   hardenWebContents(desktopPet.webContents);
   desktopPet.loadFile(path.join(__dirname, "..", "renderer", "desktop-pet.html"));
+  // Track position changes from native compositor drag (KDE KWin). The
+  // "move" event fires on both compositor and setBounds moves, so we
+  // skip saving when a JS drag IPC has the latest position.
+  desktopPet.on("move", () => {
+    if (desktopPetJsDragging) return;
+    clearTimeout(desktopPetPositionSaveTimer);
+    desktopPetPositionSaveTimer = setTimeout(() => {
+      if (!desktopPet || desktopPet.isDestroyed()) return;
+      const b = desktopPet.getBounds();
+      settings.set({ desktopPetPosition: { x: b.x, y: b.y } });
+    }, 350);
+  });
   desktopPet.on("closed", () => {
     desktopPet = null;
   });
@@ -800,7 +826,9 @@ function scheduleDesktopPet() {
 
 function moveDesktopPetTo(point = {}) {
   const position = clampDesktopPetPosition(point);
+  desktopPetJsDragging = true;
   createDesktopPet().setBounds({ ...position, ...desktopPetSize() }, false);
+  desktopPetJsDragging = false;
   clearTimeout(desktopPetPositionSaveTimer);
   desktopPetPositionSaveTimer = setTimeout(() => {
     settings.set({ desktopPetPosition: position });
@@ -1259,7 +1287,9 @@ function buildSettingsState() {
     ...settings.getAll(),
     chatProvider: providerAvailability.activeProvider || settings.get("chatProvider"),
     providerAvailability,
-    appVersion: app.getVersion()
+    appVersion: app.getVersion(),
+    isKDE: isKDE(),
+    isWayland: isWayland()
   };
 }
 
@@ -1322,6 +1352,9 @@ const MODEL_PRESETS = {
   ],
   codex: [
     { labelKey: "defaultCodex", value: "" }
+  ],
+  opencode: [
+    { label: "Default (opencode config)", value: "" }
   ]
 };
 
@@ -1333,7 +1366,9 @@ let codexModelPresetCache = {
 };
 
 function modelSettingKey(provider) {
-  return provider === "codex" ? "codexModel" : "claudeModel";
+  if (provider === "codex") return "codexModel";
+  if (provider === "opencode") return "opencodeModel";
+  return "claudeModel";
 }
 
 function parseCodexModelCatalog(stdout) {
@@ -1472,13 +1507,15 @@ function buildModelMenuItems() {
   const presets = provider && modelPresetsForProvider(provider);
   if (!presets) return [];
   const key = modelSettingKey(provider);
+  // opencode has no --model flag, so no model submenu needed
+  if (!key) return [];
   let current = String(settings.get(key) || "");
   if (provider === "codex" && current && !presets.some((item) => item.value === current)) {
     settings.set({ [key]: "" });
     current = "";
   }
   const visiblePresets = includeCurrentModelPreset(presets, current);
-  const label = provider === "codex" ? mt("modelCodex") : mt("modelClaude");
+  const label = provider === "codex" ? mt("modelCodex") : provider === "opencode" ? "Model (Open Code)" : mt("modelClaude");
   return [
     {
       label,
@@ -2004,14 +2041,35 @@ ipcMain.handle("desktop-pet:open-chat", () => openChatFromDesktopPet());
 
 ipcMain.handle("desktop-pet:move", (_, point) => moveDesktopPetTo(point));
 
+// Delta-based move: renderer sends {dx, dy} from drag start in client-space.
+// Main process adds to its known window position — works on all platforms
+// including KDE Wayland where window.screenX/Y may be 0.
+ipcMain.handle("desktop-pet:move-delta", (_, { dx = 0, dy = 0 }) => {
+  if (!desktopPet || desktopPet.isDestroyed()) return null;
+  const bounds = desktopPet.getBounds();
+  return moveDesktopPetTo({ x: Math.round(bounds.x + dx), y: Math.round(bounds.y + dy) });
+});
+
 ipcMain.handle("desktop-pet:scale", (_, factor) => scaleDesktopPetBy(factor));
 
 ipcMain.handle("popover:move", (_, point) => movePopoverTo(point));
 
+// Delta-based move: the renderer sends {dx, dy} from the drag start point in
+// client-space coordinates.  The main process adds the delta to its own known
+// window position (popover.getBounds()), which is reliable on all platforms
+// including KDE Wayland where window.screenX/Y may report 0 in the renderer.
+ipcMain.handle("popover:move-delta", (_, { dx = 0, dy = 0 }) => {
+  if (!popover || popover.isDestroyed()) return null;
+  const bounds = popover.getBounds();
+  const targetX = bounds.x + dx;
+  const targetY = bounds.y + dy;
+  return movePopoverTo({ x: Math.round(targetX), y: Math.round(targetY) });
+});
+
 ipcMain.handle("popover:get-bounds", (_, options) => {
   if (!popover || popover.isDestroyed()) return null;
   const bounds = popover.getBounds();
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || (process.platform === 'linux' && isKDE())) {
     // Only a header *move* needs the size-save guard. Edge-handle resizes
     // also fetch bounds here, and flagging those used to block their size
     // from being saved for 5 s after the drag started.
@@ -2019,7 +2077,7 @@ ipcMain.handle("popover:get-bounds", (_, options) => {
       isMovingPopover = true;
       resetMoveEndFallback();
     }
-    // Report the authoritative size: a spurious WM_SIZE shrink may already
+    // Report the authoritative size: a spurious size change may already
     // have landed during the press, before this IPC arrived.
     if (popoverExpectedSize) {
       return { ...bounds, ...popoverExpectedSize };
@@ -2029,10 +2087,11 @@ ipcMain.handle("popover:get-bounds", (_, options) => {
 });
 
 ipcMain.handle("popover:move-end", () => {
-  if (process.platform !== 'win32') return;
-  isMovingPopover = false;
-  clearTimeout(moveEndFallbackTimer);
-  scheduleSavePopoverSize();
+  if (process.platform === 'win32' || (process.platform === 'linux' && isKDE())) {
+    isMovingPopover = false;
+    clearTimeout(moveEndFallbackTimer);
+    scheduleSavePopoverSize();
+  }
 });
 
 ipcMain.handle("popover:resize-drag", (_, payload) => resizePopoverDrag(payload));

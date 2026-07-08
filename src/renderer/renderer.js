@@ -947,28 +947,39 @@ for (const handle of document.querySelectorAll(".resize-edge")) {
 }
 
 // ============================================================
-//  Window move — drag the whole app by its top bar, like a normal window
-//  title bar. We move it manually (via the main process) instead of using
-//  -webkit-app-region: drag so we can keep her smiling (笑) while she travels.
-//  window.screenX/screenY give the window's top-left in screen space; we use
-//  the absolute pointer delta from the grab point so the move never drifts.
+//  Window move — drag the whole app by its top bar.
+//  On KDE (KWin Wayland): use native -webkit-app-region drag because
+//  the compositor controls window placement — setBounds/setPosition
+//  won't move a frameless window.
+//  On other platforms: use manual JS drag (IPC delta-based) so we can
+//  keep her smiling (笑) while she travels.  Delta approach avoids
+//  window.screenX/Y which is unreliable on Wayland.
 // ============================================================
 const dragHandle = document.getElementById("dragHandle");
 let isWindowMoving = false;
-let winMoveStartScreenX = 0;
-let winMoveStartScreenY = 0;
-let winMoveStartX = 0;
-let winMoveStartY = 0;
+let winMoveStartClientX = 0;
+let winMoveStartClientY = 0;
 
-function handleHeaderPointerDown(event) {
+function setupWindowDrag(isKde) {
+  if (!dragHandle) return;
+  if (isKde) {
+    // KDE KWin: native compositor drag — triggers xdg-shell interactive move
+    dragHandle.classList.add("native-drag");
+    return;
+  }
+  // Non-KDE: manual JS drag via IPC deltas
+  dragHandle.addEventListener("pointerdown", handleHeaderPointerDownDrag);
+  dragHandle.addEventListener("pointermove", handleHeaderPointerMoveDrag);
+  dragHandle.addEventListener("pointerup", handleHeaderPointerUpDrag);
+  dragHandle.addEventListener("pointercancel", handleHeaderPointerUpDrag);
+}
+
+function handleHeaderPointerDownDrag(event) {
   if (event.button !== 0) return;
-  // Let the Clear/Stop buttons (and any control) work normally.
   if (event.target.closest("button")) return;
   isWindowMoving = true;
-  winMoveStartScreenX = event.screenX;
-  winMoveStartScreenY = event.screenY;
-  winMoveStartX = window.screenX;
-  winMoveStartY = window.screenY;
+  winMoveStartClientX = event.clientX;
+  winMoveStartClientY = event.clientY;
   try {
     dragHandle.setPointerCapture(event.pointerId);
   } catch {
@@ -978,16 +989,16 @@ function handleHeaderPointerDown(event) {
   lockMood("happy", { durationMs: DRAG_LOCK_DURATION });
 }
 
-function handleHeaderPointerMove(event) {
+function handleHeaderPointerMoveDrag(event) {
   if (!isWindowMoving) return;
   event.preventDefault();
-  window.petApi?.movePopover?.({
-    x: winMoveStartX + (event.screenX - winMoveStartScreenX),
-    y: winMoveStartY + (event.screenY - winMoveStartScreenY)
+  window.petApi?.movePopoverDelta?.({
+    dx: event.clientX - winMoveStartClientX,
+    dy: event.clientY - winMoveStartClientY
   })?.catch?.(() => {});
 }
 
-function handleHeaderPointerUp(event) {
+function handleHeaderPointerUpDrag(event) {
   if (!isWindowMoving) return;
   isWindowMoving = false;
   try {
@@ -998,11 +1009,6 @@ function handleHeaderPointerUp(event) {
   document.body.classList.remove("is-window-moving");
   releaseClickLock();
 }
-
-dragHandle?.addEventListener("pointerdown", handleHeaderPointerDown);
-dragHandle?.addEventListener("pointermove", handleHeaderPointerMove);
-dragHandle?.addEventListener("pointerup", handleHeaderPointerUp);
-dragHandle?.addEventListener("pointercancel", handleHeaderPointerUp);
 
 function handleStageClick(event) {
   if (justDragged) {
@@ -2129,6 +2135,8 @@ if (typeof ResizeObserver !== "undefined") {
       applyL10n();
       refreshComposerMeta();
     }
+    // KDE 使用原生拖拽，非 KDE 使用 JS 拖拽
+    setupWindowDrag(Boolean(payload?.isKDE));
     return applyOutfit(outfitFrom(payload));
   })
   .then(() => {

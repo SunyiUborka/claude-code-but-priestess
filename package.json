@@ -1,6 +1,6 @@
 {
   "name": "priestess-arknights",
-  "version": "0.7.6",
+  "version": "0.7.8",
   "description": "A cross-platform tray companion that lets you chat with 普瑞赛斯, backed by local Claude Code or Codex CLI usage.",
   "main": "src/main/main.js",
   "private": true,
@@ -12,6 +12,10 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
+    "dist:linux:all": "electron-builder --linux --x64",
+    "dist:deb": "electron-builder --linux deb",
+    "dist:rpm": "electron-builder --linux rpm",
+    "dist:appimage": "electron-builder --linux AppImage",
     "lint": "node scripts/check-assets.js"
   },
   "keywords": [
@@ -73,7 +77,8 @@
       "icon": "assets/character/icon.png",
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "category": "Utility"
     },

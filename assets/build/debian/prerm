@@ -1,0 +1,12 @@
+#!/bin/sh
+# prerm — Priestess pre-removal script
+set -e
+
+case "$1" in
+  remove|upgrade|deconfigure)
+    # Nothing special to clean up — user data is in ~/.config/priestess-arknights/
+    # which is intentionally kept on purge
+    ;;
+esac
+
+exit 0

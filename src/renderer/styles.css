@@ -116,6 +116,14 @@ body.is-window-moving * {
   user-select: none !important;
 }
 
+/* KDE KWin: native compositor drag (overrides .bar -webkit-app-region: no-drag).
+   On KDE Wayland, programmatic setBounds/setPosition won't move a frameless
+   window — only the xdg-shell interactive move protocol works, triggered by
+   -webkit-app-region: drag.  Applied via .native-drag class in setupWindowDrag(). */
+.bar.native-drag {
+  -webkit-app-region: drag;
+}
+
 .bar-title {
   display: flex;
   align-items: center;

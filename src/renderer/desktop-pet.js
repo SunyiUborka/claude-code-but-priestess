@@ -35,10 +35,6 @@ let lastTick = performance.now();
 let blinkTimer = null;
 let dragging = false;
 let moved = false;
-let startScreenX = 0;
-let startScreenY = 0;
-let startWindowX = 0;
-let startWindowY = 0;
 let canvasWidth = 0;
 let canvasHeight = 0;
 let action = "idle";
@@ -258,30 +254,45 @@ function scheduleBlink() {
   }, 4500 + Math.random() * 5000);
 }
 
-canvas.addEventListener("pointerdown", (event) => {
+function setupPetDrag(isKde) {
+  if (isKde) {
+    // KDE: 顶部 24px drag handle (-webkit-app-region: drag) 负责窗口移动。
+    // Canvas 完全交互（点击打开聊天 + 滚轮缩放），不受 drag 影响。
+    document.body.classList.add("native-drag");
+    return;
+  }
+  // Non-KDE: manual JS drag via IPC
+  canvas.addEventListener("pointerdown", onPetPointerDown);
+  canvas.addEventListener("pointermove", onPetPointerMove);
+  canvas.addEventListener("pointerup", onPetPointerUp);
+  canvas.addEventListener("pointercancel", onPetPointerCancel);
+}
+
+let petDragStartClientX = 0;
+let petDragStartClientY = 0;
+
+function onPetPointerDown(event) {
   dragging = true;
   moved = false;
-  startScreenX = event.screenX;
-  startScreenY = event.screenY;
-  startWindowX = window.screenX;
-  startWindowY = window.screenY;
+  petDragStartClientX = event.clientX;
+  petDragStartClientY = event.clientY;
   try {
     canvas.setPointerCapture(event.pointerId);
   } catch {
     /* continue without capture */
   }
   document.body.classList.add("is-dragging");
-});
+}
 
-canvas.addEventListener("pointermove", (event) => {
+function onPetPointerMove(event) {
   if (!dragging) return;
-  const dx = event.screenX - startScreenX;
-  const dy = event.screenY - startScreenY;
+  const dx = event.clientX - petDragStartClientX;
+  const dy = event.clientY - petDragStartClientY;
   if (Math.hypot(dx, dy) > 4) moved = true;
-  if (moved) window.petApi.moveDesktopPet({ x: startWindowX + dx, y: startWindowY + dy });
-});
+  if (moved) window.petApi.moveDesktopPetDelta({ dx, dy });
+}
 
-canvas.addEventListener("pointerup", (event) => {
+function onPetPointerUp(event) {
   dragging = false;
   try {
     canvas.releasePointerCapture(event.pointerId);
@@ -289,27 +300,20 @@ canvas.addEventListener("pointerup", (event) => {
     /* already released */
   }
   document.body.classList.remove("is-dragging");
-});
+}
 
-canvas.addEventListener("pointercancel", () => {
-  // A cancelled pointer never delivers pointerup — without this the pet would
-  // keep tracking the cursor on the next hover.
+function onPetPointerCancel() {
   dragging = false;
   document.body.classList.remove("is-dragging");
-});
+}
 
-// Scroll over the pet to scale her freely (the tray presets remain as quick
-// stops). For silky resizing we DON'T throttle or step by a fixed factor:
-// instead we accumulate the wheel delta and flush it once per animation frame
-// as a single proportional (exponential) zoom. Coalescing per frame caps the
-// IPC/resize rate at the display refresh while still reacting to scroll speed,
-// and the main process persists the result only after scrolling settles.
+// Scroll over the pet to scale her freely. Accumulate wheel deltas and flush
+// once per animation frame as a single proportional (exponential) zoom.
 const WHEEL_SENSITIVITY = 0.0011; // ~10% per mouse notch; trackpad stays smooth
 let pendingWheelDelta = 0;
 let wheelFlushScheduled = false;
 
 function normalizedWheelDelta(event) {
-  // deltaMode: 0 = pixels (trackpad / most mice), 1 = lines, 2 = pages.
   if (event.deltaMode === 1) return event.deltaY * 16;
   if (event.deltaMode === 2) return event.deltaY * 400;
   return event.deltaY;
@@ -320,8 +324,6 @@ function flushWheelScale() {
   const delta = pendingWheelDelta;
   pendingWheelDelta = 0;
   if (!delta) return;
-  // Up (negative delta) grows, down shrinks; exponential keeps it multiplicative
-  // and symmetric, so a given scroll feels the same at any current size.
   const factor = Math.exp(-delta * WHEEL_SENSITIVITY);
   window.petApi?.scaleDesktopPet?.(factor)?.catch?.(() => {});
 }
@@ -354,7 +356,11 @@ window.petApi?.onSettings?.((payload) => {
 
 (window.petApi?.getSettings?.() ?? Promise.resolve(null))
   .catch(() => null)
-  .then((payload) => applyOutfit(payload))
+  .then((payload) => {
+    // KDE: native compositor drag, non-KDE: JS drag with clientX/Y deltas
+    setupPetDrag(Boolean(payload?.isKDE));
+    return applyOutfit(payload);
+  })
   .then(() => {
     scheduleBlink();
     requestAnimationFrame(draw);
