@@ -6,3 +6,7 @@ dist/
 # 本地归档（例如打包仓库迁移到另一台机器）
 *.7z
 CLAUDE.md
+# 本地编辑器/工具配置
+.obsidian/
+.opencode/
+PRTS/
