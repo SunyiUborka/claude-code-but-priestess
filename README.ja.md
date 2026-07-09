@@ -3,7 +3,7 @@
 言語: [简体中文](README.md) | [English](README.en.md) | **日本語**
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/aklnaaw/claude-code-but-priestess/main/assets/character/%E7%9D%81%E7%9C%BC.png" alt="プレセア (普瑞赛斯)" width="220">
+  <img src="assets/character/睁眼.png" alt="プレセア (普瑞赛斯)" width="220">
 </p>
 
 > **Linux fork** — 本プロジェクトは [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess)

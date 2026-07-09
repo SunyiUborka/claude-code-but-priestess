@@ -3,7 +3,7 @@
 Language: [简体中文](README.md) | **English** | [日本語](README.ja.md)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/aklnaaw/claude-code-but-priestess/main/assets/character/%E7%9D%81%E7%9C%BC.png" alt="Priestess (普瑞赛斯)" width="220">
+  <img src="assets/character/睁眼.png" alt="Priestess (普瑞赛斯)" width="220">
 </p>
 
 > **Linux fork** — this project is a Linux port of [SVAH-X/claude-code-but-priestess](https://github.com/SVAH-X/claude-code-but-priestess),
