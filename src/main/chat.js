@@ -2354,6 +2354,52 @@ function captureWithScreencapture(out) {
   }
 }
 
+// Native Linux capture, tried before Electron's desktopCapturer: the DE's own
+// tool respects portal permissions and multi-head layouts, and on Wayland it
+// is often the only thing that produces a usable frame at all. Ordered by how
+// likely each is to be present and correct for the running session.
+function linuxScreenshotCandidates() {
+  const candidates = [];
+  const desktop = (process.env.XDG_CURRENT_DESKTOP || "").toLowerCase();
+
+  // DE-native tool (preferred)
+  if (desktop.includes("kde")) {
+    candidates.push(["spectacle", "-b", "-n", "-o"]);
+  } else if (desktop.includes("gnome") || desktop.includes("unity") || desktop.includes("pantheon")) {
+    candidates.push(["gnome-screenshot", "-f"]);
+  }
+
+  // Wayland tools (wlroots-based: Sway, Hyprland, Niri)
+  if (process.env.XDG_SESSION_TYPE === "wayland") {
+    candidates.push(["grim"]);           // grim full-screen
+  }
+
+  // X11 tools (fallback on both X11 and Wayland)
+  candidates.push(["import", "-window", "root"]);  // ImageMagick
+  candidates.push(["maim"]);                        // maim
+  candidates.push(["scrot", "-z"]);                 // scrot -z: be silent
+
+  return candidates;
+}
+
+function captureWithLinuxTool(out) {
+  for (const [cmd, ...args] of linuxScreenshotCandidates()) {
+    try {
+      const result = spawnSync(cmd, [...args, out], {
+        stdio: "ignore",
+        timeout: 5000,
+        encoding: "utf8"
+      });
+      if (result.status === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 async function takeScreenshot() {
   if (process.platform === "darwin" && screenCaptureBlocked) return null;
 
@@ -2384,6 +2430,12 @@ async function takeScreenshot() {
     // trust from terminal/Claude workflows, then attach the file to Codex via
     // `-i`. Electron capture is only a fallback.
     if (captureWithScreencapture(out)) {
+      return finish(out);
+    }
+
+    // Linux: the desktop's own tool first (grim, spectacle, gnome-screenshot,
+    // maim, scrot, import), then fall through to desktopCapturer.
+    if (process.platform === "linux" && captureWithLinuxTool(out)) {
       return finish(out);
     }
 
