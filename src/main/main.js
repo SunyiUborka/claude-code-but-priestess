@@ -1030,7 +1030,10 @@ const MENU_TEXT = {
     outfitFormal: "正装（默认）",
     outfitCasual: "休闲",
     skills: "允许她使用技能（音乐 / 搜索 / 应用）",
-    agentMode: "Agent mode（完整屏幕控制）",
+    vibeCoding: "Vibe Coding",
+    vibeCodingCompanion: "💬 陪伴模式（仅聊天）",
+    vibeCodingAdvisor: "👁 顾问模式（只读工具）",
+    vibeCodingAgent: "⚡ 代理模式（完整权限）",
     enableAgentTitle: "开启 agent mode？",
     enableAgent: "开启 agent mode",
     waifuMode: "老婆模式",
@@ -1111,7 +1114,10 @@ const MENU_TEXT = {
     outfitFormal: "正装 · Formal (default)",
     outfitCasual: "休闲 · Casual",
     skills: "Let her use skills (music · search · apps)",
-    agentMode: "Agent mode (full screen control)",
+    vibeCoding: "Vibe Coding",
+    vibeCodingCompanion: "💬 Companion (chat only)",
+    vibeCodingAdvisor: "👁 Advisor (read-only tools)",
+    vibeCodingAgent: "⚡ Agent (full access)",
     enableAgentTitle: "Enable agent mode?",
     enableAgent: "Enable agent mode",
     waifuMode: "老婆模式 · Waifu mode",
@@ -1191,7 +1197,10 @@ const MENU_TEXT = {
     themeLight: "ライト",
     themeDark: "ダーク",
     skills: "スキルを許可（音楽・検索・アプリ）",
-    agentMode: "Agent mode（画面全体を操作）",
+    vibeCoding: "Vibe Coding",
+    vibeCodingCompanion: "💬 相棒モード（会話のみ）",
+    vibeCodingAdvisor: "👁 アドバイザー（読み取り専用）",
+    vibeCodingAgent: "⚡ エージェント（完全権限）",
     enableAgentTitle: "Agent mode を有効にしますか？",
     enableAgent: "Agent mode を有効にする",
     cancel: "キャンセル",
@@ -1302,9 +1311,12 @@ async function toggleWaifuMode(nextValue) {
   settings.set({ waifuMode: Boolean(nextValue) });
 }
 
-async function toggleAgentMode(nextValue) {
-  if (nextValue) {
-    const warning = platform.agentModeWarning();
+async function setVibeCodingMode(mode) {
+  // Only raising the ceiling needs consent; dropping to a stricter tier does
+  // not. Agent is the one tier that hands over the terminal, so it keeps the
+  // platform-specific warning the old boolean had.
+  if (mode === "agent" && settings.get("vibeCodingMode") !== "agent") {
+    const warning = platform.vibeCodingModeWarning("agent");
     const result = await dialog.showMessageBox({
       type: "warning",
       title: mt("enableAgentTitle"),
@@ -1316,7 +1328,7 @@ async function toggleAgentMode(nextValue) {
     });
     if (result.response !== 1) return;
   }
-  settings.set({ agentMode: Boolean(nextValue) });
+  settings.set({ vibeCodingMode: mode });
 }
 
 function setTheme(value) {
@@ -1730,12 +1742,27 @@ function buildContextMenu() {
       click: (item) => settings.set({ skillsEnabled: item.checked })
     },
     {
-      label: mt("agentMode"),
-      type: "checkbox",
-      checked: Boolean(all.agentMode),
-      click: (item) => {
-        toggleAgentMode(item.checked);
-      }
+      label: mt("vibeCoding"),
+      submenu: [
+        {
+          label: mt("vibeCodingCompanion"),
+          type: "radio",
+          checked: all.vibeCodingMode === "companion" || !all.vibeCodingMode,
+          click: () => setVibeCodingMode("companion")
+        },
+        {
+          label: mt("vibeCodingAdvisor"),
+          type: "radio",
+          checked: all.vibeCodingMode === "advisor",
+          click: () => setVibeCodingMode("advisor")
+        },
+        {
+          label: mt("vibeCodingAgent"),
+          type: "radio",
+          checked: all.vibeCodingMode === "agent",
+          click: () => setVibeCodingMode("agent")
+        }
+      ]
     },
     {
       label: mt("waifuMode"),
@@ -1760,7 +1787,10 @@ function buildContextMenu() {
     {
       label: mt("autoScreenshot"),
       type: "checkbox",
-      visible: Boolean(all.agentMode),
+      // Bound to the tier, not to the removed agentMode key — upstream still
+      // reads that key here, which its own migration deletes, so the item
+      // never appears there.
+      visible: all.vibeCodingMode === "agent",
       checked: all.autoScreenshot !== false,
       click: (item) => settings.set({ autoScreenshot: item.checked })
     },

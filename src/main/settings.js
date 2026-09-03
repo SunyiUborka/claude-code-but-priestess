@@ -43,7 +43,11 @@ const DEFAULTS = Object.freeze({
   // "casual" (休闲 — the white butterfly dress, assets/character/casual).
   // Both sets share the same nine expression frames.
   outfit: "formal",
-  agentMode: false,
+  // Vibe coding tier: companion | advisor | agent. This is the ceiling for
+  // conversation turns; internal turns pick their own (see chat.js). Migrated
+  // from the old `agentMode` boolean on first read, which is no longer a
+  // settings key at all — set() rejects it as unknown.
+  vibeCodingMode: "companion",
   // When she commits on the Doctor's behalf, sign the commit with an honest
   // Co-Authored-By trailer (普瑞赛斯 <prts.priestess@outlook.com>) so she shows
   // up as a real contributor — the same idea as Claude Code's trailer. On by
@@ -110,6 +114,12 @@ function init() {
           parsed.desktopPetSize === "small" ? 0.8 : parsed.desktopPetSize === "large" ? 1.2 : 1.0;
       }
       delete parsed.desktopPetSize;
+      // Migration: the old boolean granted full terminal control; nothing
+      // between that and "off" existed, so `false` maps to the new default.
+      if (parsed.agentMode === true && parsed.vibeCodingMode === undefined) {
+        parsed.vibeCodingMode = "agent";
+      }
+      delete parsed.agentMode;
       cache = { ...DEFAULTS, ...parsed };
     }
   } catch (error) {
@@ -141,7 +151,7 @@ const VALIDATORS = {
   codexReasoningEffort: isReasoningEffort,
   chatProvider: (v) => ["claude", "codex", "priestess", "opencode"].includes(v),
   menuLanguage: (v) => ["system", "zh", "en", "ja"].includes(v),
-  agentMode: (v) => typeof v === "boolean",
+  vibeCodingMode: (v) => ["companion", "advisor", "agent"].includes(v),
   theme: (v) => ["system", "light", "dark"].includes(v),
   outfit: (v) => ["formal", "casual"].includes(v),
   updateChannel: (v) => ["stable", "prerelease"].includes(v)

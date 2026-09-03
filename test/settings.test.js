@@ -42,10 +42,18 @@ test("Japanese stays a legal menu language", () => {
   assert.strictEqual(roundTrip("menuLanguage", "de"), "system", "unknown language is rejected");
 });
 
-test("agentMode is still a real validated boolean, not deprecated", () => {
-  assert.strictEqual(roundTrip("agentMode", true), true);
-  assert.strictEqual(roundTrip("agentMode", false), false);
-  assert.strictEqual(roundTrip("agentMode", "yes"), false, "non-boolean is rejected");
+test("the vibe coding tiers validate, and agentMode is gone", () => {
+  for (const tier of ["companion", "advisor", "agent"]) {
+    assert.strictEqual(roundTrip("vibeCodingMode", tier), tier);
+  }
+  settings.set({ vibeCodingMode: "companion" });
+  assert.strictEqual(roundTrip("vibeCodingMode", "root"), "companion",
+    "an unknown tier is rejected");
+  // The old boolean is not a settings key any more: set() rejects it as
+  // unknown rather than storing something no reader consults.
+  assert.ok(!("agentMode" in settings.DEFAULTS));
+  settings.set({ agentMode: true });
+  assert.strictEqual(settings.get("agentMode"), undefined);
 });
 
 test("opencodeModel is a declared key, not one surviving a permissive merge", () => {
@@ -63,8 +71,9 @@ test("Claude effort levels validate, junk does not", () => {
 });
 
 test("undeclared keys are rejected", () => {
-  settings.set({ vibeCodingMode: "agent" });
-  assert.strictEqual(settings.get("vibeCodingMode"), undefined);
+  // An upstream-only key: declared there, not here.
+  settings.set({ windowsNeteaseClientControl: true });
+  assert.strictEqual(settings.get("windowsNeteaseClientControl"), undefined);
 });
 
 test("a rejected patch neither persists nor wakes subscribers", () => {

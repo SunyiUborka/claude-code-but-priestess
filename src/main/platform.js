@@ -79,4 +79,34 @@ function agentModePrompt() {
   );
 }
 
-module.exports = { agentModePrompt, agentModeWarning };
+// Per-tier consent text. Only the agent tier is a real handover of control, so
+// it keeps the platform-specific warning; the read-only tiers describe what she
+// can and cannot reach. The Linux wording names the actual tools, the same way
+// agentModePrompt does.
+function vibeCodingModeWarning(mode) {
+  if (mode === "agent") return agentModeWarning();
+
+  if (mode === "advisor") {
+    const detail =
+      process.platform === "linux"
+        ? "She can use Read, Grep, Glob, and LS to understand your project. She cannot edit files, " +
+          "run shell commands, take screenshots, or drive the keyboard and mouse - no grim, ydotool " +
+          "or xdotool.\n\nYou can change tiers any time from the tray menu."
+        : "She can use Read, Grep, Glob, and LS to understand your project, but she cannot edit files " +
+          "or run shell commands.\n\nYou can change tiers any time from the tray menu.";
+    return {
+      message: "Advisor lets her read files and search code, but not edit or run commands.",
+      detail
+    };
+  }
+
+  return {
+    message: "Companion is chat only - no file, terminal or screen access.",
+    detail:
+      "She can only talk with you: no file tools, no shell, and no automatic screenshots. " +
+      "This is the safest tier and still useful for discussion and planning.\n\n" +
+      "You can change tiers any time from the tray menu."
+  };
+}
+
+module.exports = { agentModePrompt, agentModeWarning, vibeCodingModeWarning };

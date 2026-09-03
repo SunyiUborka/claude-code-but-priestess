@@ -2004,7 +2004,9 @@ function refreshComposerMeta() {
   }
   if (providerBadge) providerBadge.textContent = provider;
   if (versionBadge && payload?.appVersion) versionBadge.textContent = `v${payload.appVersion}`;
-  if (agentBadge) agentBadge.hidden = !payload?.agentMode;
+  // Only the agent tier hands over the terminal, so only it gets the badge.
+  // (It used to read `agentMode`, which is no longer a settings key.)
+  if (agentBadge) agentBadge.hidden = payload?.vibeCodingMode !== "agent";
   sendBtn.disabled = !backendReady;
   composerInput.placeholder = backendReady
     ? chatRunning

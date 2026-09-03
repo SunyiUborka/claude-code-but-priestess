@@ -2390,11 +2390,15 @@ function validatedClaudeReasoningEffort() {
   return "";
 }
 
-function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscript, sessionPlan) {
+function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan) {
+  const mode = vibeCodingMode || "companion";
+  const isAgent = mode === "agent";
+  const isAdvisor = mode === "advisor";
+  const isMaintenance = mode === "maintenance";
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
   const systemPrompt = persona.buildPersonaPrompt({
-    agentMode,
+    vibeCodingMode: mode,
     screenshotPath,
     provider: PROVIDERS.CLAUDE,
     sharedTranscript,
@@ -2403,7 +2407,7 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
     skillsEnabled: settings.get("skillsEnabled") !== false,
     deepPersona: shouldUseDeepPersona(trimmed),
     observeEnabled:
-      settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode),
+      settings.get("waifuMode") === true && (Boolean(screenshotPath) || isAgent),
     personaNotes: settings.get("personaNotes") || "",
     catMode: silentTurnKind ? null : chatCatMode,
     coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false,
@@ -2435,12 +2439,19 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
     args.push("--effort", claudeReasoningEffort);
   }
 
-  if (agentMode) {
+  if (isAgent) {
     args.push("--dangerously-skip-permissions");
-  } else {
-    // Without agent mode she still needs file tools for memory + light helpfulness.
-    // Bash and network tools stay off until the Doctor enables agent mode.
+  } else if (isAdvisor) {
+    // Read-only: enough to understand the project, not to change it.
+    args.push("--allowedTools", "Read,Grep,Glob,LS");
+  } else if (isMaintenance) {
+    // The memory pass needs file r/w, but never Bash or network.
     args.push("--allowedTools", "Read,Edit,Write,Glob,Grep,LS");
+    args.push("--add-dir", persona.memoryDir());
+  } else {
+    // Companion: chat only. Persona and memory are injected by PRTS, so she
+    // needs no tools to be useful here.
+    args.push("--allowedTools", "");
   }
   // Let Read reach attachments dropped from outside the project dir.
   args.push(...attachmentDirArgs());
@@ -2466,12 +2477,25 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
   };
 }
 
-function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) {
+// Codex sandbox per tier. Only the memory pass gets a writable root, and only
+// its own directory: persona and memory are injected by PRTS, so an ordinary
+// conversation has no reason to write anywhere.
+function codexSandboxArgs(mode) {
+  if (mode === "agent") return ["--dangerously-bypass-approvals-and-sandbox"];
+  if (mode === "maintenance") {
+    return ["-s", "workspace-write", "--add-dir", persona.memoryDir()];
+  }
+  return ["-s", "read-only"];
+}
+
+function buildCodexPrompt(trimmed, vibeCodingMode, screenshotPath, sharedTranscript) {
+  const mode = vibeCodingMode || "companion";
+  const isAgent = mode === "agent";
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
   return (
     persona.buildPersonaPrompt({
-      agentMode,
+      vibeCodingMode: mode,
       screenshotPath,
       provider: PROVIDERS.CODEX,
       sharedTranscript,
@@ -2480,7 +2504,7 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
       skillsEnabled: settings.get("skillsEnabled") !== false,
       deepPersona: shouldUseDeepPersona(trimmed),
       observeEnabled:
-        settings.get("waifuMode") === true && (Boolean(screenshotPath) || agentMode),
+        settings.get("waifuMode") === true && (Boolean(screenshotPath) || isAgent),
       personaNotes: settings.get("personaNotes") || "",
       catMode: silentTurnKind ? null : chatCatMode,
       coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false,
@@ -2492,8 +2516,14 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
   );
 }
 
-function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTranscript, sessionPlan) {
-  const prompt = buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript);
+function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan) {
+  const mode = vibeCodingMode || "companion";
+  const isAgent = mode === "agent";
+  const isMaintenance = mode === "maintenance";
+  // The memory pass works inside the memory directory, so that is its cwd —
+  // the project tree is not its business.
+  const effectiveCwd = isMaintenance ? persona.memoryDir() : cwd;
+  const prompt = buildCodexPrompt(trimmed, mode, screenshotPath, sharedTranscript);
   const codexModel = validatedCodexModel();
   const codexReasoningEffort = validatedCodexReasoningEffort();
   // `-c` is a parent `codex exec` option, so it has to precede the `resume`
@@ -2519,9 +2549,7 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
       args.push("-i", screenshotPath);
     }
     args.push(...codexAttachmentArgs());
-    if (agentMode) {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    }
+    args.push(...codexSandboxArgs(mode));
     args.push(resumeSessionId, "-");
   } else {
     args = [
@@ -2531,7 +2559,7 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
       "never",
       "--skip-git-repo-check",
       "-C",
-      cwd
+      effectiveCwd
     ];
     if (codexModel) {
       args.push("--model", codexModel);
@@ -2541,11 +2569,7 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
       args.push("-i", screenshotPath);
     }
     args.push(...codexAttachmentArgs());
-    if (agentMode) {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    } else {
-      args.push("-s", "workspace-write", "--add-dir", persona.memoryDir());
-    }
+    args.push(...codexSandboxArgs(mode));
     args.push("-");
   }
 
@@ -2562,7 +2586,7 @@ function buildOpenCodePrompt(trimmed, sharedTranscript) {
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
   return (
     persona.buildPersonaPrompt({
-      agentMode: false,
+      vibeCodingMode: "companion",
       screenshotPath: null,
       provider: PROVIDERS.OPENCODE,
       sharedTranscript,
@@ -2608,18 +2632,18 @@ function buildProviderInvocation(
   provider,
   trimmed,
   cwd,
-  agentMode,
+  vibeCodingMode,
   screenshotPath,
   sharedTranscript,
   sessionPlan
 ) {
   if (provider === PROVIDERS.CODEX) {
-    return buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTranscript, sessionPlan);
+    return buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan);
   }
   if (provider === PROVIDERS.OPENCODE) {
     return buildOpenCodeInvocation(trimmed, cwd, sharedTranscript, sessionPlan);
   }
-  return buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscript, sessionPlan);
+  return buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan);
 }
 
 function send(text, attachments) {
@@ -2739,7 +2763,18 @@ function dispatchSend(
     silent: Boolean(silentTurnKind) || undefined
   });
 
-  const agentMode = Boolean(settings.get("agentMode"));
+  // The Doctor's tier is the ceiling for conversation turns only. Internal
+  // turns state their own need: a proactive check must at least read the
+  // screenshot, and the memory pass must write MEMORY.md. Without this the
+  // standing tier would have to be permissive enough for the most demanding
+  // turn, which is what the old agentMode boolean forced.
+  const globalMode = String(settings.get("vibeCodingMode") || "companion");
+  let vibeCodingMode = globalMode;
+  if (silentTurnKind === "proactive") {
+    vibeCodingMode = globalMode === "agent" ? "agent" : "advisor";
+  } else if (silentTurnKind === "maintenance") {
+    vibeCodingMode = "maintenance";
+  }
 
   turnLaunching = true;
 
@@ -2752,7 +2787,7 @@ function dispatchSend(
       trimmed,
       provider,
       cwd: resolveCwd(),
-      agentMode,
+      vibeCodingMode,
       sharedTranscript,
       sessionPlan,
       chained,
@@ -2814,7 +2849,7 @@ function launchPriestessTurn(trimmed) {
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
   const system = persona.buildPersonaPrompt({
-    agentMode: false,
+    vibeCodingMode: "companion",
     screenshotPath: null,
     provider: PROVIDERS.PRIESTESS,
     // History is sent as real chat messages below, so the transcript is not
@@ -2876,7 +2911,7 @@ async function launchProviderTurn({
   trimmed,
   provider,
   cwd,
-  agentMode,
+  vibeCodingMode,
   sharedTranscript,
   sessionPlan,
   chained,
@@ -2896,8 +2931,9 @@ async function launchProviderTurn({
   const proactiveCheck = silentTurnKind === "proactive";
   // When the Doctor attached files this turn, he's pointing her at THOSE — skip
   // the auto-screenshot so a full-screen grab doesn't steal her attention.
+  const isAgent = vibeCodingMode === "agent";
   const autoScreenshot =
-    agentMode && settings.get("autoScreenshot") !== false && pendingAttachments.length === 0;
+    isAgent && settings.get("autoScreenshot") !== false && pendingAttachments.length === 0;
   // Chained turns normally skip the screenshot, but an auto-continuation needs a
   // fresh screen so she can actually answer what she "saw". Proactive checks
   // exist to look at the screen, so they always capture one regardless of
@@ -2922,7 +2958,7 @@ async function launchProviderTurn({
     provider,
     trimmed,
     cwd,
-    agentMode,
+    vibeCodingMode,
     screenshotPath,
     sharedTranscript,
     sessionPlan
