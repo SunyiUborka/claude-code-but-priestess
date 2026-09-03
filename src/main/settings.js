@@ -10,6 +10,8 @@ const DEFAULTS = Object.freeze({
   // string = let the CLI / account pick its default.
   claudeModel: "",
   codexModel: "",
+  // Open Code accepts a --model flag; empty leaves it to opencode's own config.
+  opencodeModel: "",
   // Optional per-turn reasoning overrides. Empty keeps each CLI's own
   // config/default; non-empty values are passed to the selected local CLI.
   claudeReasoningEffort: "",
@@ -145,7 +147,7 @@ function get(key) {
 
 const VALIDATORS = {
   vibeCodingMode: (v) => ["companion", "advisor", "agent"].includes(v),
-  chatProvider: (v) => ["claude", "codex", "priestess"].includes(v),
+  chatProvider: (v) => ["claude", "codex", "priestess", "opencode"].includes(v),
   claudeReasoningEffort: isClaudeReasoningEffort,
   codexReasoningEffort: isReasoningEffort,
   theme: (v) => ["system", "light", "dark"].includes(v),

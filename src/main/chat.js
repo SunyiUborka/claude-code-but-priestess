@@ -37,7 +37,11 @@ const PROVIDERS = Object.freeze({
   // Built-in backend: PRTS speaks to an OpenAI-compatible server directly
   // (LiteLLM by default) — no local CLI required. Chat + skills + memory
   // injection work; CLI file tools and agent mode do not apply.
-  PRIESTESS: "priestess"
+  PRIESTESS: "priestess",
+  // Open Code: a local open-source CLI coding agent. Like Claude Code, it takes
+  // a non-interactive prompt and streams JSON back. No multimodal input, so
+  // screenshots and image attachments are skipped for it.
+  OPENCODE: "opencode"
 });
 const SHARED_TRANSCRIPT_MAX_CHARS = 9000;
 const MAX_USER_MESSAGE_CHARS = 100_000;
@@ -64,7 +68,7 @@ let quitPending = false;
 let cancelRequested = false;
 let turnLaunching = false;
 const outboundQueue = [];
-let sessionIds = { [PROVIDERS.CLAUDE]: null, [PROVIDERS.CODEX]: null };
+let sessionIds = { [PROVIDERS.CLAUDE]: null, [PROVIDERS.CODEX]: null, [PROVIDERS.OPENCODE]: null };
 // A silent self-turn (a proactive screen check, the weekly memory pass) is not
 // part of the conversation. Letting it resume the Doctor's session would bake
 // its prompt, its screenshot and its reply into that session permanently, so
@@ -290,6 +294,14 @@ function noteLongMemorySent(provider, resumeSessionId) {
 
 function providerSessionPlan(provider) {
   const savedSessionId = activeSessionIds()[provider] || null;
+  // Open Code captures its sessionID off the stream (kept for when resume
+  // lands) but buildOpenCodeInvocation cannot replay it — `opencode run` always
+  // starts fresh. Reporting a resumable session anyway made the caller trim the
+  // shared transcript to bridge-only, so from the second turn on she got
+  // neither the CLI session nor the history.
+  if (provider === PROVIDERS.OPENCODE) {
+    return { resumeSessionId: null, rotationReason: "" };
+  }
   if (provider !== PROVIDERS.CODEX) {
     return { resumeSessionId: savedSessionId, rotationReason: "" };
   }
@@ -468,6 +480,7 @@ function applyAttachmentsToPriestessMessages(messages) {
 function normalizeProvider(provider) {
   if (provider === PROVIDERS.CODEX) return PROVIDERS.CODEX;
   if (provider === PROVIDERS.PRIESTESS) return PROVIDERS.PRIESTESS;
+  if (provider === PROVIDERS.OPENCODE) return PROVIDERS.OPENCODE;
   return PROVIDERS.CLAUDE;
 }
 
@@ -486,12 +499,14 @@ function neteaseClientPlaybackEnabled() {
 function providerLabel(provider = activeProvider()) {
   if (provider === PROVIDERS.CODEX) return "Codex";
   if (provider === PROVIDERS.PRIESTESS) return "Priestess (built-in)";
+  if (provider === PROVIDERS.OPENCODE) return "Open Code";
   return "Claude Code";
 }
 
 function providerShortLabel(provider = activeProvider()) {
   if (provider === PROVIDERS.CODEX) return "Codex";
   if (provider === PROVIDERS.PRIESTESS) return "Priestess";
+  if (provider === PROVIDERS.OPENCODE) return "OpenCode";
   return "Claude";
 }
 
@@ -686,6 +701,15 @@ function detectProvider(provider, previous = null) {
   for (const candidate of executableCandidates(normalized)) {
     try {
       if (canAccessExecutable(candidate)) {
+        // opencode 0.x at /usr/bin ships without the "coder" agent and fails
+        // every turn, so a working newer build from PATH must win.
+        if (normalized === PROVIDERS.OPENCODE) {
+          const ver = spawnCliSync(candidate, ["--version"], {
+            encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "pipe"]
+          });
+          const verStr = (ver.stdout || "").trim() || (ver.stderr || "").trim();
+          if (verStr.startsWith("0.")) continue;
+        }
         const probe = probeExecutable(candidate);
         if (!probe.ok) continue;
         if (previous?.command !== candidate || previous?.version !== probe.version) {
@@ -751,7 +775,8 @@ function scanProviderAvailability() {
   return {
     [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE, previous?.[PROVIDERS.CLAUDE]),
     [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX, previous?.[PROVIDERS.CODEX]),
-    [PROVIDERS.PRIESTESS]: detectPriestessProvider()
+    [PROVIDERS.PRIESTESS]: detectPriestessProvider(),
+    [PROVIDERS.OPENCODE]: detectProvider(PROVIDERS.OPENCODE, previous?.[PROVIDERS.OPENCODE])
   };
 }
 
@@ -776,7 +801,8 @@ function emptyProviderAvailability() {
   return {
     [PROVIDERS.CLAUDE]: empty(PROVIDERS.CLAUDE),
     [PROVIDERS.CODEX]: empty(PROVIDERS.CODEX),
-    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS)
+    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS),
+    [PROVIDERS.OPENCODE]: empty(PROVIDERS.OPENCODE)
   };
 }
 
@@ -786,6 +812,7 @@ function selectAvailableProvider(requested, availability = ensureProviderAvailab
   if (availability[PROVIDERS.CODEX]?.available) return PROVIDERS.CODEX;
   if (availability[PROVIDERS.CLAUDE]?.available) return PROVIDERS.CLAUDE;
   if (availability[PROVIDERS.PRIESTESS]?.available) return PROVIDERS.PRIESTESS;
+  if (availability[PROVIDERS.OPENCODE]?.available) return PROVIDERS.OPENCODE;
   return null;
 }
 
@@ -799,7 +826,9 @@ let providerAvailabilityScannedAt = 0;
 
 function anyCliAvailable(availability) {
   return Boolean(
-    availability?.[PROVIDERS.CLAUDE]?.available || availability?.[PROVIDERS.CODEX]?.available
+    availability?.[PROVIDERS.CLAUDE]?.available ||
+    availability?.[PROVIDERS.CODEX]?.available ||
+    availability?.[PROVIDERS.OPENCODE]?.available
   );
 }
 
@@ -830,7 +859,7 @@ function getProviderAvailability(options = {}) {
   const availability = options.refresh === false
     ? providerAvailability || emptyProviderAvailability()
     : ensureProviderAvailability();
-  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS]
+  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS, PROVIDERS.OPENCODE]
     .filter((provider) => availability[provider]?.available);
   const active = selectAvailableProvider(settings.get("chatProvider"), availability);
   return {
@@ -839,7 +868,17 @@ function getProviderAvailability(options = {}) {
     providers: {
       [PROVIDERS.CLAUDE]: { ...availability[PROVIDERS.CLAUDE] },
       [PROVIDERS.CODEX]: { ...availability[PROVIDERS.CODEX] },
-      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) }
+      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) },
+      [PROVIDERS.OPENCODE]: {
+        ...(availability[PROVIDERS.OPENCODE] || {
+          provider: PROVIDERS.OPENCODE,
+          label: providerLabel(PROVIDERS.OPENCODE),
+          shortLabel: providerShortLabel(PROVIDERS.OPENCODE),
+          available: false,
+          command: null,
+          effortLevels: []
+        })
+      }
     }
   };
 }
@@ -2275,9 +2314,40 @@ function handleCodexStreamEvent(event) {
   }
 }
 
+function extractOpenCodeText(event) {
+  if (!event || typeof event !== "object") return "";
+  // opencode --format json event types:
+  //   {"type":"text","part":{"type":"text","text":"...",...}}
+  //   {"type":"step_start",...}
+  //   {"type":"step_finish",...}
+  if (event.type === "text" && event.part && typeof event.part.text === "string") {
+    return event.part.text;
+  }
+  // Fallback: try common fields
+  if (typeof event.text === "string") return event.text;
+  if (typeof event.content === "string") return event.content;
+  if (typeof event.message === "string") return event.message;
+  if (typeof event.output === "string") return event.output;
+  return "";
+}
+
+function handleOpenCodeStreamEvent(event) {
+  if (!event || typeof event !== "object") return;
+  if (event.type === "step_start" && event.sessionID) {
+    rememberProviderSession(PROVIDERS.OPENCODE, event.sessionID);
+    return;
+  }
+  const text = extractOpenCodeText(event);
+  if (text) {
+    appendReconciledAssistantText(text);
+  }
+}
+
 function handleProviderStreamEvent(provider, event) {
   if (provider === PROVIDERS.CODEX) {
     handleCodexStreamEvent(event);
+  } else if (provider === PROVIDERS.OPENCODE) {
+    handleOpenCodeStreamEvent(event);
   } else {
     handleClaudeStreamEvent(event);
   }
@@ -2599,6 +2669,53 @@ function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, shar
   };
 }
 
+function buildOpenCodePrompt(trimmed, sharedTranscript) {
+  const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
+  const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
+  return (
+    persona.buildPersonaPrompt({
+      agentMode: false,
+      screenshotPath: null,
+      provider: PROVIDERS.OPENCODE,
+      sharedTranscript,
+      includeLongMemory,
+      memoryRecallRequested,
+      skillsEnabled: settings.get("skillsEnabled") !== false,
+      deepPersona: shouldUseDeepPersona(trimmed),
+      observeEnabled: false,
+      personaNotes: settings.get("personaNotes") || "",
+      catMode: silentTurnKind ? null : chatCatMode,
+      coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false,
+      attachments: silentTurnKind ? [] : pendingAttachments
+    }) +
+    "\n\n【博士本轮请求】\n" +
+    trimmed
+  );
+}
+
+function buildOpenCodeInvocation(trimmed, cwd, sharedTranscript, sessionPlan) {
+  const prompt = buildOpenCodePrompt(trimmed, sharedTranscript);
+  // 完全模仿 Codex：opencode run --format json - 从 stdin 读提示词
+  // 不传截图（opencode 模型不支持多模态）
+  const args = ["run", "--format", "json"];
+  const opencodeModel = String(settings.get("opencodeModel") || "").trim();
+  if (opencodeModel) {
+    args.push("--model", opencodeModel);
+  }
+  if (cwd) {
+    args.push("--dir", cwd);
+  }
+  args.push("-");
+
+  return {
+    command: resolveExecutable("opencode"),
+    args,
+    stdin: prompt,
+    cleanupDirs: [],
+    resumed: false
+  };
+}
+
 function buildProviderInvocation(provider, trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds) {
   if (provider === PROVIDERS.CODEX) {
     return buildCodexInvocation(
@@ -2610,6 +2727,9 @@ function buildProviderInvocation(provider, trimmed, cwd, vibeCodingMode, screens
       sessionPlan,
       customSessionIds
     );
+  }
+  if (provider === PROVIDERS.OPENCODE) {
+    return buildOpenCodeInvocation(trimmed, cwd, sharedTranscript, sessionPlan);
   }
   return buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds);
 }
@@ -2915,11 +3035,14 @@ async function launchProviderTurn({
   // fresh screen so she can actually answer what she "saw". Proactive checks
   // exist to look at the screen, so they always capture one regardless of
   // agent mode.
+  // Open Code takes no image input, so a capture would only cost time.
   const screenshotPath =
-    proactiveCheck || (autoScreenshot && (!chained || forceScreenshot))
-      ? await takeScreenshot()
-      : null;
-  if (proactiveCheck && !screenshotPath) {
+    provider === PROVIDERS.OPENCODE
+      ? null
+      : proactiveCheck || (autoScreenshot && (!chained || forceScreenshot))
+        ? await takeScreenshot()
+        : null;
+  if (proactiveCheck && !screenshotPath && provider !== PROVIDERS.OPENCODE) {
     // Screen access is the whole point of a proactive check — without it
     // (e.g. macOS Screen Recording not granted) skip instead of running blind.
     turnLaunching = false;

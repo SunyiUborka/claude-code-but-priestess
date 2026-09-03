@@ -1412,6 +1412,11 @@ const MODEL_PRESETS = {
   ],
   codex: [
     { labelKey: "defaultCodex", value: "" }
+  ],
+  // opencode resolves its own model from its config; the flag is passed only
+  // when the Doctor pins one, and there is no catalog to enumerate here.
+  opencode: [
+    { label: "Default (opencode config)", value: "" }
   ]
 };
 
@@ -1425,7 +1430,9 @@ let codexModelPresetCache = {
 };
 
 function modelSettingKey(provider) {
-  return provider === "codex" ? "codexModel" : "claudeModel";
+  if (provider === "codex") return "codexModel";
+  if (provider === "opencode") return "opencodeModel";
+  return "claudeModel";
 }
 
 function codexDefaultPreset() {
@@ -1601,7 +1608,12 @@ function buildModelMenuItems() {
   const key = modelSettingKey(provider);
   const current = String(settings.get(key) || "");
   const visiblePresets = includeCurrentModelPreset(presets, current);
-  const label = provider === "codex" ? mt("modelCodex") : mt("modelClaude");
+  const label =
+    provider === "codex"
+      ? mt("modelCodex")
+      : provider === "opencode"
+        ? "Model (Open Code)"
+        : mt("modelClaude");
   return [
     {
       label,
