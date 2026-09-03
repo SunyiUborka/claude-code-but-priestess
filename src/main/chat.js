@@ -277,6 +277,35 @@ function attachmentDirArgs() {
 // shrinks. Returns paths with large images swapped for downscaled temp copies.
 const ATTACHMENT_MAX_DIM = 1280;
 
+// Screen captures carry UI text that needs to stay legible, so they get a
+// more generous cap than photo attachments — this is the long-edge size
+// Anthropic's own vision pipeline is tuned for, so anything above it is
+// wasted pixels rather than usable detail. Applied in place (same path) so
+// every screenshot consumer (Codex's -i, Claude's Read) sees the small copy
+// with no extra plumbing.
+const SCREENSHOT_MAX_DIM = 1568;
+
+// Resizes an image file in place if its longest edge exceeds maxDim. Returns
+// true when it actually shrank the file, false otherwise (already small
+// enough, or the image couldn't be read).
+function downscaleImageInPlace(filePath, maxDim) {
+  try {
+    const { nativeImage } = require("electron");
+    const img = nativeImage.createFromPath(filePath);
+    if (img.isEmpty()) return false;
+    const { width, height } = img.getSize();
+    if (Math.max(width, height) <= maxDim) return false;
+    const resized =
+      width >= height
+        ? img.resize({ width: maxDim, quality: "good" })
+        : img.resize({ height: maxDim, quality: "good" });
+    fs.writeFileSync(filePath, resized.toPNG());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveAttachmentsForBackend(paths) {
   if (!paths.some(isImagePath)) return paths;
   let dir = null;
@@ -2336,20 +2365,28 @@ async function takeScreenshot() {
       /* ignore */
     }
     const out = path.join(dir, `screen-${Date.now()}.png`);
+    // Every capture path below writes full native resolution (a 4K/multi-
+    // monitor grab can be tens of megapixels). Downscale in place before
+    // handing it to a backend — Codex gets it as a real image input (-i),
+    // Claude reads it with its own tool, and both pay per-pixel vision cost.
+    const finish = (capturedPath) => {
+      downscaleImageInPlace(capturedPath, SCREENSHOT_MAX_DIM);
+      return capturedPath;
+    };
 
     // macOS path
     if (captureWithScreencapture(out)) {
-      return out;
+      return finish(out);
     }
 
     // Linux: try native screenshot tools (grim, spectacle, gnome-screenshot, maim, scrot, import)
     if (process.platform === "linux") {
-      if (captureWithLinuxTool(out)) return out;
+      if (captureWithLinuxTool(out)) return finish(out);
     }
 
     if (process.platform !== "darwin") {
       try {
-        if (await captureWithDesktopCapturer(out)) return out;
+        if (await captureWithDesktopCapturer(out)) return finish(out);
       } catch (error) {
         console.warn("chat: desktopCapturer screenshot failed", error);
       }
