@@ -1317,6 +1317,26 @@ function setMenuLanguage(value) {
   settings.set({ menuLanguage: next });
 }
 
+// $XDG_SESSION_TYPE is the documented way to tell Wayland from X11; inferring
+// it from tray.getBounds() returning zeroes is not. $WAYLAND_DISPLAY is the
+// fallback for logins that do not set it (ssh, tty, unusual sessions).
+// https://www.freedesktop.org/software/systemd/man/latest/pam_systemd.html#XDG_SESSION_TYPE
+function getSessionType() {
+  const st = process.env.XDG_SESSION_TYPE;
+  if (st === "wayland" || st === "x11") return st;
+  if (process.env.WAYLAND_DISPLAY) return "wayland";
+  return process.env.DISPLAY ? "x11" : "unknown";
+}
+
+function isWayland() { return getSessionType() === "wayland"; }
+
+// KDE reports a working tray and real window geometry; Niri and GNOME without
+// an AppIndicator extension do not. The renderer uses this to decide how to
+// drag windows.
+function isKDE() {
+  return String(process.env.XDG_CURRENT_DESKTOP || "").toLowerCase().includes("kde");
+}
+
 function buildSettingsState() {
   const providerAvailability = chat.getProviderAvailability({ refresh: false });
   const vibeCodingMode = settings.get("vibeCodingMode") || "companion";
@@ -1325,6 +1345,8 @@ function buildSettingsState() {
     chatProvider: providerAvailability.activeProvider || settings.get("chatProvider"),
     providerAvailability,
     appVersion: app.getVersion(),
+    isKDE: isKDE(),
+    isWayland: isWayland(),
     // Derive agentMode for backward compat (renderer badge, auto-screenshot visibility, etc.)
     agentMode: vibeCodingMode === "agent",
     vibeCodingMode
@@ -2286,6 +2308,22 @@ ipcMain.handle("desktop-pet:move", (_, point) => moveDesktopPetTo(point));
 ipcMain.handle("desktop-pet:scale", (_, factor) => scaleDesktopPetBy(factor));
 
 ipcMain.handle("popover:move", (_, point) => movePopoverTo(point));
+
+// Delta move: the renderer sends {dx, dy} measured in client space, and the
+// main process adds it to the geometry it already knows. event.screenX/Y and
+// window.screenX/Y both report 0 under KDE Wayland, which made the absolute
+// form jump the window to the top-left corner on the first drag.
+ipcMain.handle("popover:move-delta", (_, { dx = 0, dy = 0 }) => {
+  if (!popover || popover.isDestroyed()) return null;
+  const bounds = popover.getBounds();
+  return movePopoverTo({ x: Math.round(bounds.x + dx), y: Math.round(bounds.y + dy) });
+});
+
+ipcMain.handle("desktop-pet:move-delta", (_, { dx = 0, dy = 0 }) => {
+  if (!desktopPet || desktopPet.isDestroyed()) return null;
+  const bounds = desktopPet.getBounds();
+  return moveDesktopPetTo({ x: Math.round(bounds.x + dx), y: Math.round(bounds.y + dy) });
+});
 
 ipcMain.handle("popover:get-bounds", (_, options) => {
   if (!popover || popover.isDestroyed()) return null;
