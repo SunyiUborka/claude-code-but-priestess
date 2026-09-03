@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-but-priestess",
+  "name": "priestess-arknights",
   "version": "0.7.6",
   "description": "A cross-platform tray companion that lets you chat with 普瑞赛斯, backed by local Claude Code or Codex CLI usage.",
   "main": "src/main/main.js",
@@ -18,29 +18,32 @@
     "vscode:sync": "node scripts/sync-vscode-assets.js",
     "vscode:install": "cd vscode-extension && npm install",
     "vscode:compile": "npm run vscode:sync && cd vscode-extension && npm run compile",
-    "vscode:package": "npm run vscode:compile && cd vscode-extension && npm run package"
+    "vscode:package": "npm run vscode:compile && cd vscode-extension && npm run package",
+    "dist:linux": "electron-builder --linux",
+    "dist:deb": "electron-builder --linux deb",
+    "dist:rpm": "electron-builder --linux rpm",
+    "dist:appimage": "electron-builder --linux AppImage"
   },
   "keywords": [
-    "menubar",
+    "tray",
     "electron",
-    "windows",
-    "macos",
+    "linux",
     "claude-code",
     "codex"
   ],
   "author": "",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "PolyForm Noncommercial 1.0.0",
   "devDependencies": {
     "electron": "^42.3.3",
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "local.claude-code-but-priestess.menubar",
-    "productName": "PRTS",
+    "appId": "local.priestess-arknights.menubar",
+    "productName": "priestess-arknights",
     "publish": [
       {
         "provider": "github",
-        "owner": "SVAH-X",
+        "owner": "SunyiUborka",
         "repo": "claude-code-but-priestess"
       }
     ],
@@ -54,6 +57,7 @@
       "package.json"
     ],
     "asarUnpack": [
+      "assets/**",
       "src/native/windows/NeteaseController.exe"
     ],
     "directories": {
@@ -80,6 +84,15 @@
       "artifactName": "PRTS-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "icon": "assets/character/icon.png",
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "category": "Utility"
     }
   },
   "dependencies": {
