@@ -45,10 +45,11 @@ const SUMMARY_MESSAGE_MAX_CHARS = 720;
 const ARCHIVE_MAX_BYTES = 5 * 1024 * 1024;
 const ARCHIVE_TARGET_BYTES = 4 * 1024 * 1024;
 // Codex persists every resumed turn (including our persona and transcript) in
-// its own JSONL rollout. Once that file grows large, adding an image can turn a
-// normal request into repeated transport reconnects. PRTS already owns bounded
-// cross-backend context, so rotate the CLI session before it becomes a burden.
-const CODEX_SESSION_MAX_BYTES = 16 * 1024 * 1024;
+// its own JSONL rollout, and re-reads the whole thing on every resume — so the
+// rollout size is a per-turn input cost, not just disk. PRTS already owns
+// bounded cross-backend context, so rotate well before the file gets big: at
+// 16 MB a single turn was re-sending millions of tokens of its own history.
+const CODEX_SESSION_MAX_BYTES = 2 * 1024 * 1024;
 const CODEX_SESSION_SCAN_MAX_DEPTH = 6;
 
 const subscribers = new Set();
@@ -62,6 +63,30 @@ let cancelRequested = false;
 let turnLaunching = false;
 const outboundQueue = [];
 let sessionIds = { [PROVIDERS.CLAUDE]: null, [PROVIDERS.CODEX]: null, [PROVIDERS.OPENCODE]: null };
+// A silent self-turn (a proactive screen check, the weekly memory pass) is not
+// part of the conversation. Letting it resume the Doctor's session would bake
+// its prompt, its screenshot and its reply into that session permanently, so
+// every later turn would carry and re-pay for them. While one runs, session ids
+// are read from and written to this throwaway namespace instead.
+//
+// Never read directly — go through activeSessionIds(), which derives the choice
+// from silentTurnKind alone. The retry paths in the close handler tear a turn
+// down and rebuild it, restoring silentTurnKind; anything they had to restore
+// separately would be one forgotten line away from a silent turn writing into
+// the Doctor's session after all.
+let ephemeralSessionIds = null;
+// Long memory (MEMORY.md + the folded summary + the archive tail) exists to
+// bridge across sessions: it restates conversation the backend cannot see. Once
+// a session has been handed that bundle, its own context carries everything
+// since, so a second copy in the same session is pure duplication.
+//
+// Keyed by the actual session id, not just the provider: the popover and the VS
+// Code bridge run separate Claude sessions, and a bundle delivered to one says
+// nothing about what the other holds. A fresh turn has no id yet, so it parks
+// its fingerprint in `longMemoryPending` and the id is attached in
+// `rememberProviderSession` once the backend reports it.
+let longMemorySentFor = { key: null, fingerprint: null };
+let longMemoryPending = null;
 let turnStartedAt = 0;
 let currentProvider = null;
 let longMemoryDormant = true;
@@ -226,8 +251,44 @@ function codexSessionRotationReason(sessionId) {
   }
 }
 
+// The session-id namespace this turn belongs to: the Doctor's, or the
+// throwaway one a silent self-turn lives in.
+function activeSessionIds() {
+  if (!silentTurnKind) return sessionIds;
+  if (!ephemeralSessionIds) ephemeralSessionIds = {};
+  return ephemeralSessionIds;
+}
+
+// Forget a session id (a dead `--resume`, an invalidated model/effort choice)
+// in whichever namespace owns it.
+function dropSessionId(provider) {
+  activeSessionIds()[provider] = null;
+}
+
+// True when this session still needs the long-memory bundle. A fresh session
+// always does; a resumed one only if it never got one, or MEMORY.md changed
+// underneath since it did.
+function shouldSendLongMemory(provider, resumeSessionId) {
+  if (!resumeSessionId) return true;
+  return !(
+    longMemorySentFor.key === `${provider}:${resumeSessionId}` &&
+    longMemorySentFor.fingerprint === persona.longMemoryFingerprint()
+  );
+}
+
+function noteLongMemorySent(provider, resumeSessionId) {
+  const fingerprint = persona.longMemoryFingerprint();
+  if (resumeSessionId) {
+    longMemorySentFor = { key: `${provider}:${resumeSessionId}`, fingerprint };
+    longMemoryPending = null;
+    return;
+  }
+  // Fresh session — the id arrives with the backend's first event.
+  longMemoryPending = { provider, fingerprint };
+}
+
 function providerSessionPlan(provider) {
-  const savedSessionId = sessionIds[provider] || null;
+  const savedSessionId = activeSessionIds()[provider] || null;
   // Open Code captures its sessionID off the stream (kept for when resume
   // lands) but `buildOpenCodeInvocation` cannot replay it — `opencode run`
   // always starts fresh. Reporting a resumable session anyway made the caller
@@ -1784,6 +1845,9 @@ function shouldContinueCodexTurn(finalText, entry) {
 function finishSilentTurn(finalText) {
   const kind = silentTurnKind;
   silentTurnKind = null;
+  // Drop the throwaway session namespace — the next real turn resumes the
+  // Doctor's own session, which this turn never touched.
+  ephemeralSessionIds = null;
   const text = String(finalText || pendingAssistantText || "").trim();
   pendingAssistantId = null;
   pendingAssistantText = "";
@@ -1934,7 +1998,20 @@ function appendReconciledAssistantText(text) {
 
 function rememberProviderSession(provider, value) {
   if (typeof value === "string" && value.length > 0) {
-    sessionIds[normalizeProvider(provider)] = value;
+    // A silent self-turn keeps its session id in the throwaway namespace, so a
+    // Codex tool continuation inside that turn can still resume it while the
+    // Doctor's own session stays untouched.
+    const normalized = normalizeProvider(provider);
+    activeSessionIds()[normalized] = value;
+    // A fresh turn that carried the long-memory bundle now knows which session
+    // received it, so later turns on that session can skip re-sending it.
+    if (longMemoryPending && longMemoryPending.provider === normalized) {
+      longMemorySentFor = {
+        key: `${normalized}:${value}`,
+        fingerprint: longMemoryPending.fingerprint
+      };
+      longMemoryPending = null;
+    }
   }
 }
 
@@ -2746,6 +2823,11 @@ function dispatchSend(
 ) {
   if (currentProcess || turnLaunching) return { ok: false, reason: "busy" };
 
+  // Defensive: a silent turn that died without reaching finishSilentTurn must
+  // not leave its throwaway namespace in place, or the Doctor's next real turn
+  // would start a fresh session and lose its context.
+  if (!silentTurnKind) ephemeralSessionIds = null;
+
   refreshProviderAvailability();
   const provider = activeProvider();
   const providerInfo = ensureProviderAvailability()[provider];
@@ -3118,7 +3200,7 @@ async function launchProviderTurn({
       !resumeRetryInFlight &&
       (claudeResultErrored || /No conversation found with session ID/i.test(stderrText));
     if (resumeFailed) {
-      sessionIds[PROVIDERS.CLAUDE] = null;
+      dropSessionId(PROVIDERS.CLAUDE);
       resumeRetryInFlight = true;
       claudeResultErrored = false;
       const retrySilentKind = silentTurnKind;
@@ -3154,7 +3236,7 @@ async function launchProviderTurn({
       badCodexReasoning
     ) {
       settings.set({ codexReasoningEffort: "" });
-      sessionIds[PROVIDERS.CODEX] = null;
+      dropSessionId(PROVIDERS.CODEX);
       codexReasoningFallbackInFlight = true;
       const retrySilentKind = silentTurnKind;
       const retryAttachments = pendingAttachments;
@@ -3185,7 +3267,7 @@ async function launchProviderTurn({
       badCodexModel
     ) {
       settings.set({ codexModel: "" });
-      sessionIds[PROVIDERS.CODEX] = null;
+      dropSessionId(PROVIDERS.CODEX);
       codexModelFallbackInFlight = true;
       const retrySilentKind = silentTurnKind;
       // Same as above: read the resolved attachments before the callback runs.
@@ -3328,6 +3410,9 @@ function clear() {
   claudeResultErrored = false;
   resumeRetryInFlight = false;
   silentTurnKind = null;
+  ephemeralSessionIds = null;
+  longMemorySentFor = { key: null, fingerprint: null };
+  longMemoryPending = null;
   sawSilentDirective = false;
   updateConversationSummary();
   emitHistory();
@@ -3345,6 +3430,9 @@ function wipeSession() {
   claudeResultErrored = false;
   resumeRetryInFlight = false;
   silentTurnKind = null;
+  ephemeralSessionIds = null;
+  longMemorySentFor = { key: null, fingerprint: null };
+  longMemoryPending = null;
   sawSilentDirective = false;
   emitHistory();
 }
@@ -3483,8 +3571,17 @@ function sendProactive(opts) {
   const gate = canRunSilentTurn();
   if (!gate.ok) return gate;
   silentTurnKind = "proactive";
+  // Its own throwaway session: a check runs up to the daily cap times a day and
+  // carries a screenshot, so resuming the Doctor's session would leave every
+  // one of those images and prompts in it for good, re-sent on every later turn.
+  // Cleared, not assigned — activeSessionIds() builds the namespace, and a
+  // leftover one from an earlier check must not be resumed either.
+  ephemeralSessionIds = null;
   const result = dispatchSend(buildVibeProactivePrompt(opts), { silentUser: true });
-  if (!result?.ok) silentTurnKind = null;
+  if (!result?.ok) {
+    silentTurnKind = null;
+    ephemeralSessionIds = null;
+  }
   return result;
 }
 
@@ -3494,8 +3591,14 @@ function sendMaintenance() {
   const gate = canRunSilentTurn();
   if (!gate.ok) return gate;
   silentTurnKind = "maintenance";
+  // The memory pass rewrites MEMORY.md and says nothing; none of that belongs
+  // in the conversation the Doctor is having.
+  ephemeralSessionIds = null;
   const result = dispatchSend(MAINTENANCE_PROMPT, { silentUser: true });
-  if (!result?.ok) silentTurnKind = null;
+  if (!result?.ok) {
+    silentTurnKind = null;
+    ephemeralSessionIds = null;
+  }
   return result;
 }
 
