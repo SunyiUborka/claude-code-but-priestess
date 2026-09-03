@@ -14,6 +14,9 @@ const fs = require("node:fs");
 const settings = require("./settings");
 const chat = require("./chat");
 const persona = require("./persona");
+// Lazily required inside functions: ws-server -> chat -> proactive -> ws-server
+// is a cycle, and a top-level require would resolve to a half-built module.
+function getWsServer() { return require("./ws-server"); }
 
 const TICK_MS = 60 * 1000;
 const MAINTENANCE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -25,6 +28,8 @@ const BOOT_GRACE_MS = 10 * 60 * 1000;
 let tickTimer = null;
 let lastProactiveAttemptAt = 0;
 let lastMaintenanceAttemptAt = 0;
+let lastDiagnosticAttemptAt = 0;
+let lastActivityAttemptAt = 0;
 // Daily cap state is in-memory on purpose: a tray app stays up for days, and
 // a restart at worst resets the day's budget once.
 let daily = { day: "", count: 0 };
@@ -77,12 +82,66 @@ function hasCliProvider() {
   return active === "claude" || active === "codex";
 }
 
+// ---- Editor-driven checks. Both require the VS Code bridge to report the
+// editor as active, so they are inert without the extension connected. ----
+
+function diagnosticCooldownMs() {
+  return clampNumber(settings.get("diagnosticCheckCooldownMin"), 1, 60, 5) * 60 * 1000;
+}
+
+function activityCooldownMs() {
+  return clampNumber(settings.get("activityCheckCooldownMin"), 1, 60, 3) * 60 * 1000;
+}
+
+// The gates the editor checks share with the plain proactive check: quiet
+// hours, the daily cap, a live CLI, and not butting in right after talking.
+function sharedGatesPass(now) {
+  if (chat.isBusy()) return false;
+  if (inQuietHours()) return false;
+  const day = localDayKey();
+  if (daily.day !== day) {
+    daily = { day, count: 0 };
+    lastDiagnosticAttemptAt = 0;
+    lastActivityAttemptAt = 0;
+    lastProactiveAttemptAt = 0;
+  }
+  if (daily.count >= dailyCap()) return false;
+  if (!hasCliProvider()) return false;
+  const lastTs = chat.getLastConversationTs();
+  if (lastTs && now - lastTs < cooldownMs()) return false;
+  return true;
+}
+
+function shouldRunDiagnosticCheck(now) {
+  if (settings.get("vibeCodingDiagnostics") !== true) return false;
+  if (!getWsServer().isVscodeActive()) return false;
+  if (now - lastDiagnosticAttemptAt < diagnosticCooldownMs()) return false;
+  if (!sharedGatesPass(now)) return false;
+  const diag = getWsServer().getLatestDiagnostics();
+  return Boolean(diag && diag.errors > 0);
+}
+
+function shouldRunActivityCheck(now) {
+  if (settings.get("vibeCodingActivityNarration") !== true) return false;
+  if (!getWsServer().isVscodeActive()) return false;
+  if (now - lastActivityAttemptAt < activityCooldownMs()) return false;
+  if (!sharedGatesPass(now)) return false;
+  const activities = getWsServer().getRecentActivities();
+  if (!activities || !activities.length) return false;
+  // Only worth a word while it is still fresh.
+  return activities.some((a) => now - a.timestamp < 2 * 60 * 1000);
+}
+
 function shouldRunProactive(now) {
   if (settings.get("waifuMode") !== true) return false;
   if (now - lastProactiveAttemptAt < intervalMs()) return false;
   if (inQuietHours()) return false;
   const day = localDayKey();
-  if (daily.day !== day) daily = { day, count: 0 };
+  if (daily.day !== day) {
+    daily = { day, count: 0 };
+    lastDiagnosticAttemptAt = 0;
+    lastActivityAttemptAt = 0;
+  }
   if (daily.count >= dailyCap()) return false;
   if (chat.isBusy()) return false;
   if (!hasCliProvider()) return false;
@@ -112,6 +171,19 @@ function shouldRunMaintenance(now) {
 function tick() {
   const now = Date.now();
   try {
+    // Priority: diagnostics > activity > plain check > maintenance. At most one
+    // self-turn per tick either way, so she never floods.
+    if (shouldRunDiagnosticCheck(now)) {
+      lastDiagnosticAttemptAt = now;
+      const diag = getWsServer().getLatestDiagnostics();
+      if (chat.sendProactive({ diagnosticContext: diag })?.ok) daily.count += 1;
+      return;
+    }
+    if (shouldRunActivityCheck(now)) {
+      lastActivityAttemptAt = now;
+      if (chat.sendProactive({ activityContext: true })?.ok) daily.count += 1;
+      return;
+    }
     if (shouldRunProactive(now)) {
       // Attempts move the interval forward even when dispatch fails, so a
       // broken backend can't make her retry every minute.

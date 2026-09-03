@@ -17,7 +17,11 @@
     "dist:deb": "electron-builder --linux deb",
     "dist:rpm": "electron-builder --linux rpm",
     "dist:appimage": "electron-builder --linux AppImage",
-    "lint": "node scripts/check-assets.js"
+    "lint": "node scripts/check-assets.js",
+    "vscode:sync": "node scripts/sync-vscode-assets.js",
+    "vscode:install": "cd vscode-extension && npm install",
+    "vscode:compile": "npm run vscode:sync && cd vscode-extension && npm run compile",
+    "vscode:package": "npm run vscode:compile && cd vscode-extension && npm run package"
   },
   "keywords": [
     "tray",
@@ -88,5 +92,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }

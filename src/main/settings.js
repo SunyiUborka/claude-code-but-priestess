@@ -48,6 +48,16 @@ const DEFAULTS = Object.freeze({
   // from the old `agentMode` boolean on first read, which is no longer a
   // settings key at all — set() rejects it as unknown.
   vibeCodingMode: "companion",
+  // Vibe coding: proactive diagnostic checks (she notices lint errors).
+  // Both of these only fire while the VS Code bridge reports the editor
+  // active, so they do nothing without the extension connected.
+  vibeCodingDiagnostics: false,
+  // Minutes between diagnostic proactive checks (min 1).
+  diagnosticCheckCooldownMin: 5,
+  // Vibe coding: proactive activity narration (save, git, build).
+  vibeCodingActivityNarration: false,
+  // Minutes between activity-based proactive checks (min 1).
+  activityCheckCooldownMin: 3,
   // When she commits on the Doctor's behalf, sign the commit with an honest
   // Co-Authored-By trailer (普瑞赛斯 <prts.priestess@outlook.com>) so she shows
   // up as a real contributor — the same idea as Claude Code's trailer. On by

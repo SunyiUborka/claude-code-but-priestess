@@ -20,6 +20,7 @@ const chat = require("./chat");
 const persona = require("./persona");
 const platform = require("./platform");
 const proactive = require("./proactive");
+const wsServer = require("./ws-server");
 const {
   codexHomeDir,
   parseCodexModelCatalog,
@@ -184,6 +185,7 @@ function maybeSendCatMode(petWindow) {
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.webContents.send("desktop-pet:cat-mode", currentCatMode);
   }
+  wsServer.setCatMode(currentCatMode);
 }
 
 // ============================================================
@@ -828,6 +830,8 @@ function scheduleDesktopPet() {
   // Don't start the collapse countdown while she's still replying — the timer
   // (re)starts the moment output stops, in the chat status handler.
   if (chatTurnRunning) return;
+  // Don't schedule the pet while VS Code holds her attention.
+  if (wsServer.isVscodeActive()) return;
   desktopPetTimer = setTimeout(showDesktopPet, DESKTOP_PET_IDLE_MS);
 }
 
@@ -948,7 +952,9 @@ function showPopover() {
 function collapsePopoverToDesktopPet() {
   clearTimeout(desktopPetTimer);
   desktopPetTimer = null;
-  if (!settings.get("desktopPet")) {
+  // When VS Code holds her attention, just hide the popover — the pet would
+  // only distract, and the Doctor is going back to the editor anyway.
+  if (!settings.get("desktopPet") || wsServer.isVscodeActive()) {
     hideDesktopPet();
     clearWindowFade();
     if (popover && !popover.isDestroyed()) {
@@ -1972,6 +1978,7 @@ function wipePersistedConversation() {
 // carrying her words, unless the Doctor is already looking at the chat.
 // Clicking the notification opens the popover.
 function notifyProactiveMessage(text) {
+  if (wsServer.isVscodeActive()) return;
   if (popover && popover.isVisible() && popover.isFocused()) return;
   if (!Notification.isSupported()) return;
   try {
@@ -2002,6 +2009,7 @@ function notifyProactiveMessage(text) {
 
 function maybeNotifyDoneNotification(event) {
   if (event.status !== "idle") return;
+  if (wsServer.isVscodeActive()) return;
   if (event.error || event.cancelled || event.silent) return;
   const duration = chat.getLastTurnDurationMs();
   if (duration < 20000) return;
@@ -2108,6 +2116,29 @@ app.whenReady().then(() => {
   // backend availability — lives in proactive.js.
   proactive.start();
 
+  // WebSocket bridge for the VS Code extension. While the editor is connected
+  // she lives in its sidebar, so the popover and the desktop pet stand down.
+  wsServer.start({
+    onVscodeConnected() {
+      clearTimeout(desktopPetTimer);
+      desktopPetTimer = null;
+      if (popover && !popover.isDestroyed()) {
+        clearWindowFade();
+        popover.hide();
+        popover.setOpacity(1);
+      }
+      if (desktopPet && !desktopPet.isDestroyed()) desktopPet.hide();
+    },
+    onVscodeDisconnected() {
+      // Bring the pet back immediately, no idle delay.
+      if (settings.get("desktopPet")) {
+        clearTimeout(desktopPetTimer);
+        desktopPetTimer = null;
+        showDesktopPet();
+      }
+    }
+  });
+
   setTimeout(() => {
     chat.refreshProviderAvailability();
     syncTrayTooltip();
@@ -2205,6 +2236,8 @@ app.on("before-quit", () => {
   // Don't orphan a mid-turn CLI subprocess — it would keep running (and
   // consuming the Doctor's quota) with no UI attached.
   chat.cancel();
+  try { require("./vscode-chat").cancel(); } catch { /* not started */ }
+  try { wsServer.stop(); } catch { /* not started */ }
 });
 
 // ============================================================

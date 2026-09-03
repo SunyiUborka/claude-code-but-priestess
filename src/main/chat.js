@@ -13,6 +13,7 @@ const skills = require("./skills");
 const priestessProvider = require("./priestess-provider");
 const { spawnCli, spawnCliSync } = require("./cli-spawn");
 const { parseClaudeEffortLevels } = require("./claude-capabilities");
+const { resolveResumeSessionId } = require("./chat-runtime");
 const {
   compatibleReasoningEffort,
   findCatalogModel,
@@ -2390,7 +2391,7 @@ function validatedClaudeReasoningEffort() {
   return "";
 }
 
-function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan) {
+function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds) {
   const mode = vibeCodingMode || "companion";
   const isAgent = mode === "agent";
   const isAdvisor = mode === "advisor";
@@ -2456,8 +2457,11 @@ function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTr
   // Let Read reach attachments dropped from outside the project dir.
   args.push(...attachmentDirArgs());
 
-  if (sessionPlan?.resumeSessionId) {
-    args.push("--resume", sessionPlan.resumeSessionId);
+  // The VS Code bridge owns an isolated session namespace, so it hands its own
+  // map in rather than sharing the popover's module-level ids.
+  const resumeSessionId = resolveResumeSessionId(PROVIDERS.CLAUDE, sessionPlan, customSessionIds);
+  if (resumeSessionId) {
+    args.push("--resume", resumeSessionId);
   }
 
   // Build the stdin (user message). When attachments exist, list their file names
@@ -2473,7 +2477,7 @@ function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTr
     args,
     stdin: `${stdinArgs}\n`,
     cleanupDirs: promptFile ? [promptFile.dir] : [],
-    resumed: Boolean(sessionPlan?.resumeSessionId)
+    resumed: Boolean(resumeSessionId)
   };
 }
 
@@ -2516,7 +2520,7 @@ function buildCodexPrompt(trimmed, vibeCodingMode, screenshotPath, sharedTranscr
   );
 }
 
-function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan) {
+function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds) {
   const mode = vibeCodingMode || "companion";
   const isAgent = mode === "agent";
   const isMaintenance = mode === "maintenance";
@@ -2531,7 +2535,7 @@ function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, shar
   const reasoningArgs = codexReasoningEffort
     ? ["-c", `model_reasoning_effort=${JSON.stringify(codexReasoningEffort)}`]
     : [];
-  const resumeSessionId = sessionPlan?.resumeSessionId || null;
+  const resumeSessionId = resolveResumeSessionId(PROVIDERS.CODEX, sessionPlan, customSessionIds);
   let args;
 
   if (resumeSessionId) {
@@ -2635,15 +2639,16 @@ function buildProviderInvocation(
   vibeCodingMode,
   screenshotPath,
   sharedTranscript,
-  sessionPlan
+  sessionPlan,
+  customSessionIds
 ) {
   if (provider === PROVIDERS.CODEX) {
-    return buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan);
+    return buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds);
   }
   if (provider === PROVIDERS.OPENCODE) {
     return buildOpenCodeInvocation(trimmed, cwd, sharedTranscript, sessionPlan);
   }
-  return buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan);
+  return buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds);
 }
 
 function send(text, attachments) {
@@ -3395,11 +3400,53 @@ function canRunSilentTurn() {
 
 // A self-initiated check (proactive care): she looks at the screen and decides
 // whether anything is worth saying. Nothing appears in chat unless she speaks.
-function sendProactive() {
+// The editor-driven variants of a proactive turn. Both fall back to the plain
+// screen check when no editor context came with the call.
+function buildDiagnosticProactivePrompt(diag) {
+  const lines = [
+    buildProactivePrompt(),
+    "",
+    "另外，博士的 VS Code 编辑器刚刚检测到以下问题：",
+    `- ${diag.errors} 个错误，${diag.warnings} 个警告，涉及 ${diag.totalFilesWithProblems} 个文件`
+  ];
+  for (const d of (diag.details || []).slice(0, 5)) {
+    const file = (d.file || "").split(/[\\/]/).pop();
+    lines.push(`  - [${d.severity}] ${file}:${d.line}: ${d.message}`);
+  }
+  lines.push(
+    "",
+    "请用你自然的风格轻声提醒博士这些错误——你注意到了，可以帮他看看。",
+    "不要逐条罗列，用你的话概括最值得关注的。如果你觉得只是小问题，也可以只说 [[silent]]。"
+  );
+  return lines.join("\n");
+}
+
+function buildActivityProactivePrompt() {
+  const activities = require("./ws-server").getRecentActivities();
+  const lines = [buildProactivePrompt(), "", "博士最近的编辑器活动："];
+  for (const a of (activities || []).slice(-5)) {
+    const time = new Date(a.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    lines.push(`  - [${time}] ${a.detail}`);
+  }
+  lines.push(
+    "",
+    "请根据博士最近的操作，自然地给一句鼓励、提醒或轻松的话。",
+    "若觉得没什么值得说的，可直接回复 [[silent]]。"
+  );
+  return lines.join("\n");
+}
+
+function buildVibeProactivePrompt(opts) {
+  if (opts?.diagnosticContext) return buildDiagnosticProactivePrompt(opts.diagnosticContext);
+  if (opts?.activityContext) return buildActivityProactivePrompt();
+  return buildProactivePrompt();
+}
+
+function sendProactive(opts) {
   const gate = canRunSilentTurn();
   if (!gate.ok) return gate;
   silentTurnKind = "proactive";
-  const result = dispatchSend(buildProactivePrompt(), { silentUser: true });
+  const result = dispatchSend(buildVibeProactivePrompt(opts), { silentUser: true });
   if (!result?.ok) silentTurnKind = null;
   return result;
 }
@@ -3459,6 +3506,11 @@ module.exports = {
   subscribe,
   refreshProviderAvailability,
   getProviderAvailability,
+  // Exported for the VS Code bridge (its own session namespace) and for the
+  // directive tests — not part of the popover's own flow.
+  buildProviderInvocation,
+  consumeDirectives,
+  stripDirectiveTags,
   getHistory,
   getPersistableHistory,
   hydrate,
