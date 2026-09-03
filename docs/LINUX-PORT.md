@@ -64,6 +64,20 @@ into the fork, and they are worth keeping here:
   `pushSystem`, so they never reach the panel. Still broken upstream as of
   c05e33c — worth a pull request rather than only a local fix.
 
+## Deferred, not dropped
+
+`01793aa` on `port/upstream-catchup` restructures the system prompt into a
+byte-identical cached prefix plus a per-turn context, and stops resending the
+long-memory bundle into a session that already has it. Both halves are one
+refactor and both live in the prompt-assembly path, which on this base differs
+enough that carrying it is a re-implementation rather than a merge: six
+conflict blocks across `chat.js` and `persona.js`, mixed with OpenCode and
+Codex-prompt context that belongs to other items on this list.
+
+It has seven tests of its own (`test/persona-cache-prefix.test.js`) pinning the
+invariants, so it can be redone here with a real safety net. Worth doing after
+the OpenCode backend lands, since two of the conflicts are OpenCode-shaped.
+
 ## Deliberately not carried
 
 - Windows NetEase automation (`netease-client.js`, `NeteaseController.cs`): win32 only.
