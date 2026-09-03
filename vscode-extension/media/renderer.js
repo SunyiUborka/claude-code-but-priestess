@@ -56,6 +56,9 @@ const RENDERER_TEXT = {
     sprite_load_failed: "角色立绘加载失败。",
     no_cli: "未检测到 CLI",
     cwd_home: (p) => `${p} · $HOME · 右键托盘菜单设置`,
+    tier_companion: "陪伴",
+    tier_advisor: "顾问",
+    tier_agent: "⚡ 代理",
     cwd_queue: (n) => `${n} 排队中`,
     cwd_running: "发送中",
     ph_ready: "和她说点什么…（Shift+Enter 换行）",
@@ -85,6 +88,9 @@ const RENDERER_TEXT = {
     sprite_load_failed: "Failed to load character sprites.",
     no_cli: "No CLI detected",
     cwd_home: (p) => `${p} · $HOME · right-click tray to set`,
+    tier_companion: "companion",
+    tier_advisor: "advisor",
+    tier_agent: "⚡ agent",
     cwd_queue: (n) => `${n} queued`,
     cwd_running: "sending",
     ph_ready: "Say something… (Shift+Enter for newline)",
@@ -114,6 +120,9 @@ const RENDERER_TEXT = {
     sprite_load_failed: "キャラクター画像の読込に失敗しました。",
     no_cli: "CLI が見つかりません",
     cwd_home: (p) => `${p} · $HOME · 右クリックトレイメニュー設定`,
+    tier_companion: "相棒",
+    tier_advisor: "顧問",
+    tier_agent: "⚡ エージェント",
     cwd_queue: (n) => `${n} 件待機中`,
     cwd_running: "送信中",
     ph_ready: "話しかける…（Shift+Enter で改行）",
@@ -1999,12 +2008,16 @@ function refreshComposerMeta() {
   const cwd = (payload?.chatCwd || "").trim();
   const queueSuffix = queueLength > 0 ? ` · ${t("cwd_queue", queueLength)}` : "";
   const runningSuffix = chatRunning ? ` · ${t("cwd_running")}` : "";
+  // The tier belongs on screen wherever she runs. The popover also has the ⚡
+  // badge, but a VS Code panel hides the whole top bar, so this line is the
+  // only place agent access is visible there.
+  const modeLabel = t("tier_" + (payload?.vibeCodingMode || "companion"));
   if (cwd) {
     const truncated = cwd.length > 42 ? "…" + cwd.slice(-41) : cwd;
-    cwdLine.textContent = `${provider} · ${truncated}${queueSuffix}${runningSuffix}`;
+    cwdLine.textContent = `${provider} · ${truncated}${queueSuffix}${runningSuffix} · ${modeLabel}`;
     cwdLine.title = cwd;
   } else {
-    cwdLine.textContent = t("cwd_home", provider) + queueSuffix + runningSuffix;
+    cwdLine.textContent = t("cwd_home", provider) + queueSuffix + runningSuffix + ` · ${modeLabel}`;
     cwdLine.title = "";
   }
   if (providerBadge) providerBadge.textContent = provider;
