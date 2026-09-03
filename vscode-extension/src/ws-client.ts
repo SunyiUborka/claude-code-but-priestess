@@ -20,9 +20,11 @@ interface PortFile {
   version: string;
 }
 
-// Release builds use "PRTS" as the app name; dev builds use the repo name.
-// Try the release name first, then the dev name.
-const APP_NAMES = ["PRTS", "claude-code-but-priestess"];
+// The data directory is named after the Electron app name, so it differs per
+// build. This fork uses "priestess-arknights" for both dev and packaged
+// builds (package.json name and build.productName agree); the upstream names
+// stay in the list so an extension built here still finds an upstream app.
+const APP_NAMES = ["priestess-arknights", "PRTS", "claude-code-but-priestess"];
 
 function dataDirFor(appName: string): string {
   switch (process.platform) {
