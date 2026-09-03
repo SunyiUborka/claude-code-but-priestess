@@ -166,7 +166,12 @@ function applyL10n() {
 // Two outfits ship with the app,同样的九种表情: "formal" (正装, the classic
 // coat, assets/character root — default) and "casual" (休闲, the white
 // butterfly dress, assets/character/casual). The tray menu switches them.
-const CHARACTER_DIR = new URL("../../assets/character/", window.location.href);
+// In the Electron windows the sprites sit two levels up from this script, but
+// a VS Code webview serves them from an entirely different origin and injects
+// the base URI. Undefined in Electron, so the relative path still applies.
+const CHARACTER_DIR = window.__CHARACTER_BASE_URI__
+  ? new URL(window.__CHARACTER_BASE_URI__)
+  : new URL("../../assets/character/", window.location.href);
 
 function assetDirFor(outfit) {
   return outfit === "casual" ? new URL("casual/", CHARACTER_DIR) : CHARACTER_DIR;
