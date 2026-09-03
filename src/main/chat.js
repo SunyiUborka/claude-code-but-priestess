@@ -1527,9 +1527,14 @@ function compactForSummary(text, maxChars = SUMMARY_MESSAGE_MAX_CHARS) {
   return `${compact.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
+// Does this turn actually ask her to remember something? A match injects the
+// whole long-memory bundle (tens of thousands of characters), so the cues have
+// to be ones that really mean recall. `之前` / `以前` / `before` / `previous`
+// used to be in here and matched ordinary time words in almost any sentence
+// ("before you run the build"), which made the expensive path the normal one.
 function shouldIncludeLongMemoryForText(text) {
   const value = String(text || "").toLowerCase();
-  return /记得|记忆|回忆|之前|以前|上次|上回|曾经|我们聊过|你知道我|想起来|remember|memory|recall|previous|last time|before/.test(value);
+  return /记得|记忆|回忆|上次|上回|曾经|我们聊过|我跟你说过|你知道我|想起来|remember|memory|recall|last time/.test(value);
 }
 
 // Decide whether to load the SHE deep-emotional canon for this turn. Triggers
@@ -2510,14 +2515,23 @@ function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTr
   const isAgent = mode === "agent";
   const isAdvisor = mode === "advisor";
   const isMaintenance = mode === "maintenance";
+  // The VS Code bridge owns an isolated session namespace, so it hands its own
+  // map in rather than sharing the popover's module-level ids. Resolved up here
+  // because whether the turn resumes decides what context it still needs.
+  const resumeSessionId = resolveResumeSessionId(PROVIDERS.CLAUDE, sessionPlan, customSessionIds);
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
-  const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
-  const systemPrompt = persona.buildPersonaPrompt({
+  const includeLongMemory =
+    (!longMemoryDormant || memoryRecallRequested) &&
+    shouldSendLongMemory(PROVIDERS.CLAUDE, resumeSessionId);
+  const { system: systemPrompt, context } = persona.buildPersonaParts({
     vibeCodingMode: mode,
     screenshotPath,
     provider: PROVIDERS.CLAUDE,
     sharedTranscript,
     includeLongMemory,
+    // A fresh session receives the full recent tail as its shared transcript,
+    // so the archive tail would repeat the very same messages verbatim.
+    includeArchiveTail: Boolean(resumeSessionId),
     memoryRecallRequested,
     skillsEnabled: settings.get("skillsEnabled") !== false,
     deepPersona: shouldUseDeepPersona(trimmed),
@@ -2529,6 +2543,7 @@ function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTr
     attachments: silentTurnKind ? [] : pendingAttachments
 
   });
+  if (includeLongMemory) noteLongMemorySent(PROVIDERS.CLAUDE, resumeSessionId);
   const promptFile = createInvocationTempFile("prts-claude-", "system-prompt.txt", systemPrompt);
   const args = [
     "-p",
@@ -2571,25 +2586,28 @@ function buildClaudeInvocation(trimmed, vibeCodingMode, screenshotPath, sharedTr
   // Let Read reach attachments dropped from outside the project dir.
   args.push(...attachmentDirArgs());
 
-  // The VS Code bridge owns an isolated session namespace, so it hands its own
-  // map in rather than sharing the popover's module-level ids.
-  const resumeSessionId = resolveResumeSessionId(PROVIDERS.CLAUDE, sessionPlan, customSessionIds);
   if (resumeSessionId) {
     args.push("--resume", resumeSessionId);
   }
 
-  // Build the stdin (user message). When attachments exist, list their file names
-  // so the model sees them as part of the current turn's request, not just in the
-  // system prompt where they can be missed.
-  const stdinArgs =
-    (Array.isArray(pendingAttachments) && pendingAttachments.length)
-      ? trimmed + pendingAttachments.map((p) => `\n附件的路径：${p}`).join("")
-      : trimmed;
+  // Build the stdin (user message). The per-turn context leads it: the system
+  // prompt above must stay byte-identical across the session or the cached
+  // prefix — the persona AND the whole conversation behind it — is discarded
+  // and re-billed every turn. Here it is the last thing in the request, so
+  // nothing is cached behind it and it costs only itself.
+  //
+  // Attachment paths are repeated in the request line so the model sees them
+  // as part of what is being asked, not just as context it can skim past.
+  const attachmentLines =
+    Array.isArray(pendingAttachments) && pendingAttachments.length
+      ? pendingAttachments.map((p) => `\n附件的路径：${p}`).join("")
+      : "";
+  const request = `${trimmed}${attachmentLines}\n`;
 
   return {
     command: resolveExecutable("claude"),
     args,
-    stdin: `${stdinArgs}\n`,
+    stdin: context ? `${context}【博士本轮请求】\n${request}` : request,
     cleanupDirs: promptFile ? [promptFile.dir] : [],
     resumed: Boolean(resumeSessionId)
   };
@@ -2606,32 +2624,39 @@ function codexSandboxArgs(mode) {
   return ["-s", "read-only"];
 }
 
-function buildCodexPrompt(trimmed, vibeCodingMode, screenshotPath, sharedTranscript) {
+function buildCodexPrompt(trimmed, vibeCodingMode, screenshotPath, sharedTranscript, resumeSessionId) {
   const mode = vibeCodingMode || "companion";
   const isAgent = mode === "agent";
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
-  const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
-  return (
-    persona.buildPersonaPrompt({
-      vibeCodingMode: mode,
-      screenshotPath,
-      provider: PROVIDERS.CODEX,
-      sharedTranscript,
-      includeLongMemory,
-      memoryRecallRequested,
-      skillsEnabled: settings.get("skillsEnabled") !== false,
-      deepPersona: shouldUseDeepPersona(trimmed),
-      observeEnabled:
-        settings.get("waifuMode") === true && (Boolean(screenshotPath) || isAgent),
-      personaNotes: settings.get("personaNotes") || "",
-      catMode: silentTurnKind ? null : chatCatMode,
-      coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false,
-      attachments: silentTurnKind ? [] : pendingAttachments
+  const includeLongMemory =
+    (!longMemoryDormant || memoryRecallRequested) &&
+    shouldSendLongMemory(PROVIDERS.CODEX, resumeSessionId);
+  const { system, context } = persona.buildPersonaParts({
+    vibeCodingMode: mode,
+    screenshotPath,
+    provider: PROVIDERS.CODEX,
+    sharedTranscript,
+    includeLongMemory,
+    includeArchiveTail: Boolean(resumeSessionId),
+    memoryRecallRequested,
+    skillsEnabled: settings.get("skillsEnabled") !== false,
+    deepPersona: shouldUseDeepPersona(trimmed),
+    observeEnabled:
+      settings.get("waifuMode") === true && (Boolean(screenshotPath) || isAgent),
+    personaNotes: settings.get("personaNotes") || "",
+    catMode: silentTurnKind ? null : chatCatMode,
+    coauthorCommits: !silentTurnKind && settings.get("coauthorCommits") !== false,
+    attachments: silentTurnKind ? [] : pendingAttachments
 
-    }) +
-    "\n\n【博士本轮请求】\n" +
-    trimmed
-  );
+  });
+  if (includeLongMemory) noteLongMemorySent(PROVIDERS.CODEX, resumeSessionId);
+  // Codex has no separate system-prompt channel: the whole prompt arrives as
+  // one user turn, and it appends every turn verbatim to its rollout, which it
+  // re-reads on every resume. Re-sending the full overlay would therefore be
+  // stored N times and re-billed on all N later turns. A resumed session
+  // already carries it, so it gets a short reminder of the format rules only.
+  const head = resumeSessionId ? persona.personaReminder() : `${system}\n\n`;
+  return `${head}${context}【博士本轮请求】\n${trimmed}`;
 }
 
 function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, sharedTranscript, sessionPlan, customSessionIds) {
@@ -2641,7 +2666,6 @@ function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, shar
   // The memory pass works inside the memory directory, so that is its cwd —
   // the project tree is not its business.
   const effectiveCwd = isMaintenance ? persona.memoryDir() : cwd;
-  const prompt = buildCodexPrompt(trimmed, mode, screenshotPath, sharedTranscript);
   const codexModel = validatedCodexModel();
   const codexReasoningEffort = validatedCodexReasoningEffort();
   // `-c` is a parent `codex exec` option, so it has to precede the `resume`
@@ -2649,7 +2673,10 @@ function buildCodexInvocation(trimmed, cwd, vibeCodingMode, screenshotPath, shar
   const reasoningArgs = codexReasoningEffort
     ? ["-c", `model_reasoning_effort=${JSON.stringify(codexReasoningEffort)}`]
     : [];
+  // Resolved before the prompt: a resumed rollout already holds the persona, so
+  // whether this turn resumes decides how much of it the prompt has to carry.
   const resumeSessionId = resolveResumeSessionId(PROVIDERS.CODEX, sessionPlan, customSessionIds);
+  const prompt = buildCodexPrompt(trimmed, mode, screenshotPath, sharedTranscript, resumeSessionId);
   let args;
 
   if (resumeSessionId) {
@@ -2930,7 +2957,7 @@ const PRIESTESS_MESSAGES_MAX_CHARS = 16000;
 // Recent conversational turns as proper chat-completions messages. The current
 // user message is already in history (pushed by dispatchSend); the empty
 // assistant bubble is skipped by the empty-text filter.
-function buildPriestessMessages() {
+function buildPriestessMessages(contextPrefix = "") {
   const messages = [];
   for (const entry of history) {
     if (!entry || entry.ephemeral || entry.queued) continue;
@@ -2957,6 +2984,18 @@ function buildPriestessMessages() {
     total += length;
   }
   const result = kept.reverse();
+  // The per-turn context rides the last user message, not the system prompt, so
+  // the system prompt stays byte-stable and cacheable across the session (see
+  // persona.buildPersonaParts). Applied after budgeting: it is this turn's cost
+  // either way, and it must not push conversation out of the window.
+  if (contextPrefix) {
+    const last = result[result.length - 1];
+    if (last && last.role === "user") {
+      last.content = `${contextPrefix}【博士本轮请求】\n${last.content}`;
+    } else {
+      result.push({ role: "user", content: contextPrefix });
+    }
+  }
   // Inline this turn's files/images into the final user message (built-in
   // backend has no file tools). Done after budgeting so the char-length math
   // above keeps working on plain-string content.
@@ -2972,7 +3011,7 @@ function launchPriestessTurn(trimmed) {
   const turnHadImages = pendingAttachments.some(isImagePath);
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
-  const system = persona.buildPersonaPrompt({
+  const { system, context } = persona.buildPersonaParts({
     vibeCodingMode: "companion",
     screenshotPath: null,
     provider: PROVIDERS.PRIESTESS,
@@ -3000,7 +3039,7 @@ function launchPriestessTurn(trimmed) {
     apiKey: settings.get("priestessApiKey"),
     model: settings.get("priestessModel"),
     system,
-    messages: buildPriestessMessages(),
+    messages: buildPriestessMessages(context),
     onDelta: (text) => {
       if (currentProcess === handle) appendAssistant(text);
     },

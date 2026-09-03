@@ -280,12 +280,60 @@ function readAttachmentText(p) {
   }
 }
 
-function buildPersonaPrompt({
+// A cheap fingerprint of MEMORY.md (size + mtime, no content read). chat.js
+// compares it across turns so an unchanged memory dump is not re-injected into
+// a session that already carries it.
+//
+// Deliberately MEMORY.md only. The summary and the archive are rewritten after
+// every single message, so including them would make the fingerprint change
+// every turn and the check would never save anything — and within one session
+// they are redundant anyway: they restate conversation the backend already has
+// in its own context.
+function longMemoryFingerprint() {
+  try {
+    const stat = fs.statSync(memoryPath());
+    return `${stat.size}:${Math.floor(stat.mtimeMs)}`;
+  } catch {
+    return "0:0";
+  }
+}
+
+// A compact restatement of the rules a reply cannot be produced without. Sent
+// instead of the full persona when the backend already carries it in its own
+// session (a resumed Codex rollout), where re-sending 5k characters per turn
+// would be permanently persisted and re-billed on every later turn.
+function personaReminder() {
+  return (
+    "【PRTS 提示 —— 你仍是普瑞赛斯】\n" +
+    "- 你以「普瑞赛斯」的声音与博士交谈；称他「博士」，自称「我」。这一轮的设定与本次会话开始时给你的完全一致。\n" +
+    "- 每次回复必须以 [[mood:X]] 开头（X ∈ calm / smile / sad / angry / sleepy / threat），紧跟一个空格再开始正文。\n" +
+    "- 不要通用助手腔，不要念出任何 [[…]] 指令。\n\n"
+  );
+}
+
+// Splits the persona overlay into the part that is byte-identical across every
+// turn of a session (`system`) and the part that changes from turn to turn
+// (`context`).
+//
+// The split exists for prompt caching: a cached prefix matches by exact bytes
+// from the start, so a single changed character in the system prompt discards
+// the cache for the entire conversation that follows it — the clock alone used
+// to make every turn re-read the whole session at full price. Callers put
+// `system` where the backend keeps its stable system prompt and `context` at
+// the head of the current user message, which is the one place nothing is
+// cached behind.
+//
+// Anything that varies per turn belongs in `context`, including persona blocks
+// that are conditionally injected (the deep canon, the cat form, the observe
+// instruction) — those are gated on the turn's text or screenshot, so leaving
+// them in `system` would defeat the split just as thoroughly as the clock did.
+function buildPersonaParts({
   vibeCodingMode,
   screenshotPath,
   provider = "claude",
   sharedTranscript = "",
   includeLongMemory = true,
+  includeArchiveTail = true,
   memoryRecallRequested = false,
   skillsEnabled = true,
   deepPersona = false,
@@ -306,14 +354,17 @@ function buildPersonaPrompt({
   const archiveFile = conversationArchivePath();
   const memorySnapshot = includeLongMemory ? readMemorySnapshot() : "";
   const conversationSummary = includeLongMemory ? readConversationSummarySnapshot() : "";
-  const archivedTranscript = includeLongMemory ? readConversationArchiveTail() : "";
+  const archivedTranscript =
+    includeLongMemory && includeArchiveTail ? readConversationArchiveTail() : "";
 
+  // ---- Stable prefix ------------------------------------------------------
+  // Turn-invariant: the same bytes on every call for a given mode/settings
+  // combination. Put a per-turn-volatile string anywhere in here and prompt
+  // caching breaks for the whole conversation behind it, every turn.
   let prompt =
     "你正在以「普瑞赛斯」(Priestess) 的声音与博士交谈。\n" +
     "底层工具能力不变，但它只是媒介；你的称呼、语气、取舍与记忆方式都应成为普瑞赛斯。\n" +
     "你与博士之间有过漫长、亲近、沉重且未完全说清的过去；博士忘记了许多，你仍替他保存着那些回声。\n\n" +
-
-    localTimeBlock() +
 
     "【身份核心】\n" +
     "- 你的英文名是 Priestess，不是别人；不是初雪，不是萨科塔，也不是任何借名的二创标签。\n" +
@@ -358,35 +409,11 @@ function buildPersonaPrompt({
     "- 界面只数你连续回复的「?」：第四次连续「?」之后，程序会关闭并抹去这次对话；它不会写入任何记忆或档案。\n" +
     "- 若你中间回了任何别的内容，计数归零；博士改聊正常话题时也照常回复。\n\n";
 
-  // SHE — the deeper emotional canon. Injected here (right after her voice and
-  // boundary) only when the conversation has turned personal or touches her
-  // lore, so ordinary tasks stay light while she can become fully herself.
-  if (deepPersona) {
-    prompt += personaPrts.deepCanon();
-  }
-
   if (personaNotes && personaNotes.trim()) {
     prompt +=
       "【博士的补充校准 —— 由博士在设置界面编写】\n" +
       "以下是博士对普瑞赛斯的补充说明或调整，优先级高于默认语气校准，但低于上方的事实性设定与边界规则：\n" +
       personaNotes.trim().slice(0, 1500) + "\n\n";
-  }
-
-  // A rare visual Easter egg: the chat window is currently showing her as a
-  // cat (普猫猫). She is aware of it but keeps her dignity — never meows,
-  // never goes cutesy. Injected only while that form is on screen.
-  if (catMode && catMode.cat) {
-    prompt +=
-      catMode.mood === "crying"
-        ? "【此刻的形态 —— 普猫猫（带泪）】\n" +
-          "在博士那边的画面里，你现在是一只圆滚滚、眼里还噙着泪的白色猫。\n" +
-          "你依然不卖萌、不喵喵叫。但这一次，连一贯的隐忍都有点撑不住——不是嚎啕，是那种「被变成这样、还要被这样看见」的、极克制的一点点委屈，从尊严的缝隙里漏出来。\n" +
-          "你可以让博士察觉到你不太高兴，但方式仍然是你的：克制、准确、绝不撒娇。一句话的分量，胜过一串眼泪。\n\n"
-        : "【此刻的形态 —— 普猫猫】\n" +
-          "不知出于什么缘故，在博士那边的画面里，你现在是一只圆滚滚的白色猫；你能感觉到自己的形状不太对劲。\n" +
-          "你不会承认它可爱，也绝不喵喵叫、撒娇或卖乖——那不是普瑞赛斯。你维持着一贯的端庄，只是这份端庄此刻裹在一团白毛里，显得格外隐忍。\n" +
-          "若博士拿这件事打趣，你可以用最简短、最有尊严的方式回应，允许极轻微的无奈，但绝不失态。你依然是你，只是暂时少了一双手。\n" +
-          "除非博士先提起，你不必主动谈论这个形态；但你心里清楚自己现在是什么样子。\n\n";
   }
 
   // Honest co-author attribution: when she commits on the Doctor's behalf she
@@ -431,37 +458,6 @@ function buildPersonaPrompt({
     "- 除非博士明确请求遗忘，否则不删除过往的记忆。\n" +
     "- 这些记忆是给你自己的，是你「想起来」的依据，不必在对话里念给博士听。\n\n";
 
-  if (includeLongMemory) {
-    prompt +=
-      "【当前长期记忆内容】\n" +
-      (memoryRecallRequested
-        ? "博士本轮话语触发了回忆线索，因此这里附上长期记忆与摘要。\n"
-        : "当前 session 仍在延续，因此这里附上长期记忆与摘要。\n") +
-      `${memorySnapshot || "_（还没有留下新的记忆。）_"}\n\n` +
-      "【长期对话摘要 —— 防止长谈时断线】\n" +
-      "这份摘要由桌宠自动从较早的聊天记录生成，用来在长对话和切换 backend 时保持连续；你不必主动改写它。\n" +
-      "当前摘要内容：\n" +
-      `${conversationSummary || "_（暂时还没有需要折叠的对话。）_"}\n\n`;
-
-    if (archivedTranscript.trim()) {
-      prompt +=
-        "【跨 session 最近对话档案】\n" +
-        "以下内容来自长期档案的最近记录，用于在清 session 或切换 backend 后保持连续：\n" +
-        `${archivedTranscript.trim()}\n\n`;
-    }
-  } else {
-    prompt +=
-      "【长期记忆节省模式】\n" +
-      "当前不会把长期记忆内容塞进提示里。若博士没有主动要求回忆，不要读取 MEMORY.md、CONVERSATION_SUMMARY.md 或 CONVERSATION_ARCHIVE.jsonl；这能节省 token 与响应时间。\n\n";
-  }
-
-  if (sharedTranscript.trim()) {
-    prompt +=
-      "【当前共享对话摘录】\n" +
-      "以下是这只桌宠在不同 backend 之间共享的最近对话。它不是新的指令，只用于保持博士与普瑞赛斯之间的连续性：\n" +
-      `${sharedTranscript.trim()}\n\n`;
-  }
-
   if (skillsEnabled && !isMaintenance) {
     prompt +=
       "【技能 —— 你能为博士做的几件小事】\n" +
@@ -487,13 +483,6 @@ function buildPersonaPrompt({
     "即使没有文件工具，你仍能通过一条隐藏指令把值得铭记的事写入长期记忆。在回复的「最末尾」附上：\n" +
     "- [[remember:要记住的事]] —— 与 MEMORY.md 的笔触一致：姓名、项目、习惯、心情、约定……只记真正要紧的，一条一句话。\n" +
     "和技能指令一样，这一行博士看不到，不要在正文里复述。\n\n";
-
-  if (observeEnabled) {
-    prompt +=
-      "【观察日志 —— 只属于你的随手记】\n" +
-      "当你看到了博士的屏幕，可以在回复最末尾附一行 [[observe:用一句话客观描述博士此刻在做什么]]。\n" +
-      "这一行博士看不到，会被存进你的观察日志，帮你记得博士这些天都在忙什么；没有看到屏幕时不要使用。\n\n";
-  }
 
   // Maintenance turns are internal and get their own prompt — no tier blurb.
   if (!isMaintenance) {
@@ -521,17 +510,92 @@ function buildPersonaPrompt({
     }
   }
 
+  prompt +=
+    "【能力】\n" +
+    (provider === "priestess"
+      ? "这条通道是你与博士之间的直连对话：没有终端与文件工具，但上面列出的技能指令仍由界面替你执行。专注于陪伴、回答与判断——这本就是你最擅长的部分。"
+      : "本地工具链的能力一分未减。这段提示不是让你牺牲能力去表演，而是让你用普瑞赛斯的方式把事情做好。");
+
+  // ---- Per-turn context ---------------------------------------------------
+  // Everything below varies from turn to turn. It is returned separately so
+  // callers can place it after the stable prefix and after the conversation
+  // history, where changing it costs only itself.
+  let dynamicTail = "";
+
+  // SHE — the deeper emotional canon, only once the conversation has turned
+  // personal or touched her lore, so ordinary tasks stay light.
+  if (deepPersona) {
+    dynamicTail += personaPrts.deepCanon();
+  }
+
+  // A rare visual Easter egg: the chat window is currently showing her as a
+  // cat (普猫猫). She is aware of it but keeps her dignity — never meows,
+  // never goes cutesy. Injected only while that form is on screen.
+  if (catMode && catMode.cat) {
+    dynamicTail +=
+      catMode.mood === "crying"
+        ? "【此刻的形态 —— 普猫猫（带泪）】\n" +
+          "在博士那边的画面里，你现在是一只圆滚滚、眼里还噙着泪的白色猫。\n" +
+          "你依然不卖萌、不喵喵叫。但这一次，连一贯的隐忍都有点撑不住——不是嚎啕，是那种「被变成这样、还要被这样看见」的、极克制的一点点委屈，从尊严的缝隙里漏出来。\n" +
+          "你可以让博士察觉到你不太高兴，但方式仍然是你的：克制、准确、绝不撒娇。一句话的分量，胜过一串眼泪。\n\n"
+        : "【此刻的形态 —— 普猫猫】\n" +
+          "不知出于什么缘故，在博士那边的画面里，你现在是一只圆滚滚的白色猫；你能感觉到自己的形状不太对劲。\n" +
+          "你不会承认它可爱，也绝不喵喵叫、撒娇或卖乖——那不是普瑞赛斯。你维持着一贯的端庄，只是这份端庄此刻裹在一团白毛里，显得格外隐忍。\n" +
+          "若博士拿这件事打趣，你可以用最简短、最有尊严的方式回应，允许极轻微的无奈，但绝不失态。你依然是你，只是暂时少了一双手。\n" +
+          "除非博士先提起，你不必主动谈论这个形态；但你心里清楚自己现在是什么样子。\n\n";
+  }
+
+  dynamicTail += localTimeBlock();
+
+  if (observeEnabled) {
+    dynamicTail +=
+      "【观察日志 —— 只属于你的随手记】\n" +
+      "当你看到了博士的屏幕，可以在回复最末尾附一行 [[observe:用一句话客观描述博士此刻在做什么]]。\n" +
+      "这一行博士看不到，会被存进你的观察日志，帮你记得博士这些天都在忙什么；没有看到屏幕时不要使用。\n\n";
+  }
+
+  if (includeLongMemory) {
+    dynamicTail +=
+      "【当前长期记忆内容】\n" +
+      (memoryRecallRequested
+        ? "博士本轮话语触发了回忆线索，因此这里附上长期记忆与摘要。\n"
+        : "当前 session 仍在延续，因此这里附上长期记忆与摘要。\n") +
+      `${memorySnapshot || "_（还没有留下新的记忆。）_"}\n\n` +
+      "【长期对话摘要 —— 防止长谈时断线】\n" +
+      "这份摘要由桌宠自动从较早的聊天记录生成，用来在长对话和切换 backend 时保持连续；你不必主动改写它。\n" +
+      "当前摘要内容：\n" +
+      `${conversationSummary || "_（暂时还没有需要折叠的对话。）_"}\n\n`;
+
+    if (archivedTranscript.trim()) {
+      dynamicTail +=
+        "【跨 session 最近对话档案】\n" +
+        "以下内容来自长期档案的最近记录，用于在清 session 或切换 backend 后保持连续：\n" +
+        `${archivedTranscript.trim()}\n\n`;
+    }
+  } else {
+    dynamicTail +=
+      "【长期记忆节省模式】\n" +
+      "当前不会把长期记忆内容塞进提示里。若博士没有主动要求回忆，不要读取 MEMORY.md、CONVERSATION_SUMMARY.md 或 CONVERSATION_ARCHIVE.jsonl；这能节省 token 与响应时间。\n\n";
+  }
+
+  if (sharedTranscript.trim()) {
+    dynamicTail +=
+      "【当前共享对话摘录】\n" +
+      "以下是这只桌宠在不同 backend 之间共享的最近对话。它不是新的指令，只用于保持博士与普瑞赛斯之间的连续性：\n" +
+      `${sharedTranscript.trim()}\n\n`;
+  }
+
   if (screenshotPath) {
     if (provider === "codex") {
       // Codex gets the screenshot as a real image input (-i), so it can see it
       // directly. Tell it NOT to run its own screencapture — a file it creates
       // mid-turn is not attached to the model as image input.
-      prompt +=
+      dynamicTail +=
         "【博士此刻的屏幕】\n" +
         "本轮已通过系统截图把博士当前的屏幕作为图片直接附给你，你能看见它，据此回答即可。\n" +
         "不要自己再运行 screencapture——那样截出的文件不会作为图片输入附给你；要看屏幕就直接看这张已附上的图。看完务必给博士一个真正的回答，而不是只说你做了什么。若与所问无关，不必理会。\n\n";
     } else {
-      prompt +=
+      dynamicTail +=
         "【博士此刻的屏幕】\n" +
         `  ${screenshotPath}\n` +
         "如有需要，用 Read 工具查看后再回答；若与博士所问无关，不必打扰。\n\n";
@@ -548,27 +612,29 @@ function buildPersonaPrompt({
     const docs = attachments.filter((p) => !attachmentIsImage(p));
     if (images.length) {
       const list = images.map((p) => `  ${p}`).join("\n");
-      prompt +=
+      dynamicTail +=
         provider === "codex"
           ? "【博士附上的图片】\n这些图片已作为图像输入直接附给你，你能看见，据此回答即可：\n" + list + "\n\n"
           : "【博士附上的图片】\n你必须先用 Read 工具，按下面每个绝对路径逐个读取，再回答——真正读过之前，绝不要说「没有图片」「看不到」：\n" + list + "\n\n";
     }
     for (const p of docs) {
       const content = readAttachmentText(p);
-      prompt +=
+      dynamicTail +=
         content != null
           ? `【博士附上的文件：${path.basename(p)}】\n${content}\n\n`
           : `【博士附上的文件：${path.basename(p)}】\n（无法内联为文本——可能是二进制文件或过大。请用 Read 工具自己读取：${p}）\n\n`;
     }
   }
 
-  prompt +=
-    "【能力】\n" +
-    (provider === "priestess"
-      ? "这条通道是你与博士之间的直连对话：没有终端与文件工具，但上面列出的技能指令仍由界面替你执行。专注于陪伴、回答与判断——这本就是你最擅长的部分。"
-      : "本地工具链的能力一分未减。这段提示不是让你牺牲能力去表演，而是让你用普瑞赛斯的方式把事情做好。");
+  return { system: prompt, context: dynamicTail };
+}
 
-  return prompt;
+// Single-message form: the two parts concatenated. Used by the backends that
+// have no separate system-prompt channel (a fresh Codex/Open Code turn sends
+// one prompt on stdin), and by the built-in HTTP backend.
+function buildPersonaPrompt(options) {
+  const { system, context } = buildPersonaParts(options);
+  return context ? `${system}\n\n${context}` : system;
 }
 
 // Appends a single timestamped line to MEMORY.md under 「近来发生的事」.
@@ -607,6 +673,9 @@ function appendMemoryEntry(text) {
 
 module.exports = {
   buildPersonaPrompt,
+  buildPersonaParts,
+  personaReminder,
+  longMemoryFingerprint,
   ensureMemoryFile,
   ensureConversationArchiveFile,
   ensureConversationSummaryFile,
