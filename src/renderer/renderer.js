@@ -56,6 +56,9 @@ const RENDERER_TEXT = {
     sprite_load_failed: "角色立绘加载失败。",
     no_cli: "未检测到 CLI",
     cwd_home: (p) => `${p} · $HOME · 右键托盘菜单设置`,
+    tier_companion: "陪伴",
+    tier_advisor: "顾问",
+    tier_agent: "⚡ 代理",
     cwd_queue: (n) => `${n} 排队中`,
     cwd_running: "发送中",
     ph_ready: "和她说点什么…（Shift+Enter 换行）",
@@ -85,6 +88,9 @@ const RENDERER_TEXT = {
     sprite_load_failed: "Failed to load character sprites.",
     no_cli: "No CLI detected",
     cwd_home: (p) => `${p} · $HOME · right-click tray to set`,
+    tier_companion: "companion",
+    tier_advisor: "advisor",
+    tier_agent: "⚡ agent",
     cwd_queue: (n) => `${n} queued`,
     cwd_running: "sending",
     ph_ready: "Say something… (Shift+Enter for newline)",
@@ -103,6 +109,37 @@ const RENDERER_TEXT = {
     preview_close_title: "Close preview",
     preview_browser_opened: "Opened in browser.",
     preview_browser_failed: "Failed to open browser."
+  },
+  ja: {
+    chat_empty_hint: "何か話しかけてください。",
+    send_failed: (r) => `送信失敗: ${r}`,
+    clear_confirm: "現在の会話をクリアしますか？長期記憶は保持されます。",
+    clear_done: "会話をクリアしました。",
+    error_prefix: (m) => `エラー: ${m}`,
+    cancelled: "停止しました。",
+    sprite_load_failed: "キャラクター画像の読込に失敗しました。",
+    no_cli: "CLI が見つかりません",
+    cwd_home: (p) => `${p} · $HOME · 右クリックトレイメニュー設定`,
+    tier_companion: "相棒",
+    tier_advisor: "顧問",
+    tier_agent: "⚡ エージェント",
+    cwd_queue: (n) => `${n} 件待機中`,
+    cwd_running: "送信中",
+    ph_ready: "話しかける…（Shift+Enter で改行）",
+    ph_running: "返信中もメッセージをどうぞ…（Shift+Enter 改行）",
+    ph_no_cli: "Claude Code または Codex CLI をインストールしてください…",
+    btn_clear: "クリア",
+    btn_clear_title: "会話をクリア",
+    btn_stop: "停止",
+    btn_stop_title: "返信を停止",
+    preview_expand: "▼ プレビュー",
+    preview_collapse: "▸ プレビュー",
+    preview_title: "HTML プレビュー",
+    preview_open: "ブラウザで開く",
+    preview_open_title: "デフォルトブラウザで開く",
+    preview_close_title: "プレビューを閉じる",
+    preview_browser_opened: "ブラウザで開きました。",
+    preview_browser_failed: "ブラウザを開けませんでした。"
   }
 };
 
@@ -2071,8 +2108,10 @@ function refreshComposerMeta() {
   const cwd = (payload?.chatCwd || "").trim();
   const queueSuffix = queueLength > 0 ? ` · ${t("cwd_queue", queueLength)}` : "";
   const runningSuffix = chatRunning ? ` · ${t("cwd_running")}` : "";
-  const mode = payload?.vibeCodingMode || "companion";
-  const modeLabel = mode === "agent" ? "agent" : mode === "advisor" ? "advisor" : "陪伴";
+  // The tier belongs on screen wherever she runs. The popover also has the ⚡
+  // badge, but a VS Code panel hides the whole top bar, so this line is the
+  // only place agent access is visible there.
+  const modeLabel = t("tier_" + (payload?.vibeCodingMode || "companion"));
   if (cwd) {
     const truncated = cwd.length > 42 ? "…" + cwd.slice(-41) : cwd;
     cwdLine.textContent = `${provider} · ${truncated}${queueSuffix}${runningSuffix} · ${modeLabel}`;

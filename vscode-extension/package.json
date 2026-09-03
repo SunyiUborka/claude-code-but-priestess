@@ -13,8 +13,13 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Chat", "Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Chat",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -39,8 +44,8 @@
         "icon": "$(history)"
       },
       {
-        "command": "prts.toggleVibeCoding",
-        "title": "PRTS: Toggle Vibe Coding Mode (陪伴 ↔ 顾问)",
+        "command": "prts.setVibeCodingMode",
+        "title": "PRTS: Set Permission Tier (companion / advisor / agent)",
         "icon": "$(sync)"
       },
       {
@@ -104,7 +109,7 @@
           "group": "2_info@1"
         },
         {
-          "command": "prts.toggleVibeCoding",
+          "command": "prts.setVibeCodingMode",
           "group": "3_mode@1"
         }
       ],
@@ -126,7 +131,7 @@
         "when": "editorHasSelection"
       },
       {
-        "command": "prts.toggleVibeCoding",
+        "command": "prts.setVibeCodingMode",
         "key": "ctrl+shift+alt+v",
         "when": "editorTextFocus"
       }
