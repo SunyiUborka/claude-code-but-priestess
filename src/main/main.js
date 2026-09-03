@@ -1882,7 +1882,50 @@ function maybeNotifyDoneNotification(event) {
   }
 }
 
+// ============================================================
+//  Single-instance lock. A second launch would register a second
+//  StatusNotifierItem and run a second CLI pipeline over the same
+//  conversation.json. The first instance keeps the lock; the new
+//  process shows an alert and exits.
+// ============================================================
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.whenReady().then(async () => {
+    await dialog.showMessageBox({
+      type: "info",
+      title: "PRTS · 普瑞赛斯",
+      message: "普瑞赛斯已在运行中",
+      detail:
+        "普瑞赛斯已经在系统托盘中运行。\n" +
+        "若托盘图标不可见（Niri、未装 AppIndicator 的 GNOME Wayland 等），" +
+        "请用 PRTS_SHOW_ON_START=1 启动；如需重新启动，" +
+        "请先在托盘右键菜单中选择「退出」。",
+      buttons: ["确定"]
+    });
+    app.exit(0);
+  });
+} else {
+  app.on("second-instance", () => {
+    // Someone tried to launch a second copy — bring this one forward instead.
+    if (popover && !popover.isDestroyed()) {
+      if (popover.isMinimized()) popover.restore();
+      if (!popover.isVisible()) {
+        hideDesktopPet();
+        positionPopover();
+        showPopover();
+      }
+      popover.focus();
+    } else {
+      togglePopover();
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  // A second instance shows its alert and exits from the block above; without
+  // this guard it would still build a tray icon and clobber the real one.
+  if (!gotSingleInstanceLock) return;
   // On macOS, become a status-menu accessory BEFORE creating the Tray.
   // Packaged builds set LSUIElement=true in Info.plist so they already launch
   // as accessories; dev (`npm run dev`) and raw Electron.app launches need an
