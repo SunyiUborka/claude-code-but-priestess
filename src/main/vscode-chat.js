@@ -527,16 +527,11 @@ function dispatchSend(trimmed, context, { userAlreadyShown = false } = {}) {
   }
   const sharedTranscript = sharedLines.join("\n");
 
-  const rawMode = settings.get("vibeCodingMode") || "companion";
-  // VS Code extension never gets full agent — cap at advisor.
-  const vibeCodingMode = rawMode === "agent" ? "advisor" : rawMode;
-  // Keep the downgrade visible in history before the assistant reply starts.
-  // pushSystem, not a bare history.push: the bare push never emitted, so the
-  // notice did not reach the panel and the Doctor saw only her saying she
-  // needed approval, with the tray still reading "agent".
-  if (rawMode === "agent") {
-    pushSystem("VS Code 扩展不支持代理模式，已切换至顾问模式（只读工具）。");
-  }
+  // The editor client honours the Doctor's tier, agent included. Upstream caps
+  // this at advisor; we do not, because writing is most of the point inside an
+  // editor. The tier is shown in the panel's status line so full access is
+  // never in effect invisibly.
+  const vibeCodingMode = settings.get("vibeCodingMode") || "companion";
 
   beginAssistant();
 

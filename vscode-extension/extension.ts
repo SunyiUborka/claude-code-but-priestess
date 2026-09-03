@@ -72,20 +72,48 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Vibe coding: toggle companion ↔ advisor (VS Code extension doesn't need full agent)
   context.subscriptions.push(
-    vscode.commands.registerCommand("prts.toggleVibeCoding", async () => {
-      if (!wsClient || !wsClient.isConnected()) return;
+    vscode.commands.registerCommand("prts.setVibeCodingMode", async () => {
+      if (!wsClient || !wsClient.isConnected()) {
+        vscode.window.showWarningMessage("PRTS: not connected to the tray app.");
+        return;
+      }
       try {
         const res: any = await wsClient.send("settings:get");
-        const state = res?.state || {};
-        const current = state.vibeCodingMode || "companion";
-        // Only companion and advisor — agent is the tray app's domain.
-        const next = current === "companion" ? "advisor" : "companion";
-        await wsClient.send("settings:set", { patch: { vibeCodingMode: next } });
-        const labels: Record<string, string> = {
-          companion: "💬 陪伴模式（仅聊天）",
-          advisor: "👁 顾问模式（只读工具）",
-        };
-        vscode.window.showInformationMessage(`PRTS: ${labels[next]}`);
+        const current = (res?.state || {}).vibeCodingMode || "companion";
+        const tiers = [
+          { value: "companion", label: "\u{1F4AC} Companion", description: "chat only, no tools" },
+          { value: "advisor", label: "\u{1F441} Advisor", description: "read-only: Read, Grep, Glob, LS" },
+          { value: "agent", label: "\u{26A1} Agent", description: "full access: edits files, runs commands" },
+        ];
+        const picked = await vscode.window.showQuickPick(
+          tiers.map((t) => ({
+            label: t.value === current ? t.label + "  \u{2713}" : t.label,
+            description: t.description,
+            value: t.value,
+          })),
+          { placeHolder: "PRTS: permission tier (shared with the tray app)" }
+        );
+        if (!picked || picked.value === current) return;
+
+        // Agent hands over the terminal. The tray asks before granting it, so
+        // this path asks too rather than being the quiet way in.
+        if (picked.value === "agent") {
+          const go = await vscode.window.showWarningMessage(
+            "Grant Priestess full access?",
+            {
+              modal: true,
+              detail:
+                "She will be able to edit files and run any shell command without asking each " +
+                "time, here and in the tray app. While it is on, the tier is shown in the " +
+                "panel's status line.",
+            },
+            "Grant agent access"
+          );
+          if (go !== "Grant agent access") return;
+        }
+
+        await wsClient.send("settings:set", { patch: { vibeCodingMode: picked.value } });
+        vscode.window.showInformationMessage("PRTS: " + picked.value);
       } catch (_) { /* ignore */ }
     })
   );
