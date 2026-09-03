@@ -1,0 +1,102 @@
+name: Sync upstream
+
+on:
+  # 自动同步已关闭：上游 cherry-pick 由维护者手动执行
+  # 如需手动运行，在 GitHub Actions 页面点 "Run workflow"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Check upstream changes
+        id: check
+        run: |
+          git remote add upstream https://github.com/SVAH-X/claude-code-but-priestess.git
+          git fetch upstream main
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "Already up to date."
+          fi
+
+      - name: Merge upstream
+        if: steps.check.outputs.behind > 0
+        id: merge
+        run: |
+          git config user.name "aklnaaw"
+          git config user.email "aklnaaww@gmail.com"
+          if git merge upstream/main --no-edit; then
+            echo "Merge successful."
+          else
+            echo "CONFLICT=1" >> $GITHUB_ENV
+          fi
+
+      - name: Create conflict issue
+        if: env.CONFLICT == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ Upstream merge conflict',
+              body: 'Auto-merge of upstream/main failed. Resolve manually:\n```\n'
+                + 'git remote add upstream https://github.com/SVAH-X/claude-code-but-priestess.git\n'
+                + 'git fetch upstream\ngit merge upstream/main\n# fix conflicts then:\n'
+                + 'git commit\ngit push origin main\n```'
+            })
+
+      - name: Setup Node.js
+        if: env.CONFLICT != '1' && steps.check.outputs.behind > 0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build verification
+        if: env.CONFLICT != '1' && steps.check.outputs.behind > 0
+        run: |
+          NEW_VER=$(git show HEAD:package.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+          echo "NEW_VER=$NEW_VER" >> $GITHUB_ENV
+
+          npm install
+          echo "Running Linux build verification..."
+          if npx electron-builder --linux dir; then
+            echo "BUILD_OK=1" >> $GITHUB_ENV
+          else
+            echo "BUILD_OK=0" >> $GITHUB_ENV
+          fi
+
+      - name: Build failed - create issue
+        if: env.BUILD_OK == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Build failed after upstream merge (v${{ env.NEW_VER }})`,
+              body: 'Upstream merged but Linux build failed. Check:'
+                + '\n- Electron API changes\n- New macOS/Windows deps\n- Build config changes'
+                + '\n\nFix locally and tag manually.'
+            })
+
+      - name: Push merge and tag
+        if: env.BUILD_OK == '1'
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${NEW_VER}/" packaging/aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/aur/PKGBUILD
+          git add packaging/aur/PKGBUILD
+          git commit -m "chore: bump to ${NEW_VER}"
+          git push origin main
+          git tag "v${NEW_VER}"
+          git push origin "v${NEW_VER}"

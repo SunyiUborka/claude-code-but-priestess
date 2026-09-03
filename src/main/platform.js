@@ -23,6 +23,18 @@ function agentModeWarning() {
     };
   }
 
+  if (process.platform === "linux") {
+    return {
+      message:
+        "Agent mode lets her run any command on your Linux system without asking permission for each tool.",
+      detail:
+        "She will be able to take screenshots (via PipeWire/xdg-desktop-portal), read and edit files, " +
+        "and run any shell command. Linux permissions (PolKit, AppArmor, SELinux) may still restrict " +
+        "certain actions depending on your distribution.\n\n" +
+        "Only enable this if you trust the conversation. You can turn it off any time from the tray menu."
+    };
+  }
+
   return {
     message:
       "Agent mode lets her run any command on your computer without asking permission for each tool.",
@@ -51,6 +63,15 @@ function agentModePrompt() {
     );
   }
 
+  if (process.platform === "linux") {
+    return (
+      "- 你可以读取本轮自动附上的屏幕截图；\n" +
+      "- 需要额外截图时，可使用 `gnome-screenshot`、`spectacle`、`grim` 或 `maim` 等工具；\n" +
+      "- 可用 `ydotool`、`xdotool`（X11）或 `wtype`（Wayland）操控鼠标与键盘；\n" +
+      "- 任何终端命令都可以直接执行。\n"
+    );
+  }
+
   return (
     "- 你可以读取本轮自动附上的屏幕截图；\n" +
     "- 需要额外截图或操作鼠标键盘时，使用当前系统已安装的自动化工具；\n" +
@@ -62,6 +83,15 @@ function vibeCodingModeWarning(mode) {
   if (mode === "agent") return agentModeWarning();
 
   if (mode === "advisor") {
+    if (process.platform === "linux") {
+      return {
+        message: "Advisor lets her read files and search code, but not edit or run commands.",
+        detail:
+          "She can use Read, Grep, Glob, and LS to understand your project. She cannot edit files, " +
+          "run shell commands, take screenshots, or drive the keyboard and mouse - no grim, ydotool " +
+          "or xdotool.\n\nYou can change tiers any time from the tray menu."
+      };
+    }
     return {
       message: "Advisor mode lets her read files and search code, but not edit or run commands.",
       detail:

@@ -263,14 +263,18 @@ function attachmentIsImage(p) {
 }
 
 // Read a non-image attachment as text to inline into the prompt. Skips binaries
-// (NUL byte) and anything over ~1MB; truncates very long files.
+// (NUL byte) and files over ~10MB; truncates very long files. Even when inlining
+// fails, the path is passed so the model can reach the file with its own tools.
+const ATTACH_TEXT_MAX_BYTES = 10 * 1024 * 1024;
+const ATTACH_TEXT_MAX_CHARS = 100000;
+
 function readAttachmentText(p) {
   try {
-    if (fs.statSync(p).size > 1024 * 1024) return null;
+    if (fs.statSync(p).size > ATTACH_TEXT_MAX_BYTES) return null;
     const buf = fs.readFileSync(p);
     if (buf.includes(0)) return null;
     let text = buf.toString("utf8");
-    if (text.length > 20000) text = text.slice(0, 20000) + "\n…（文件过长，已截断）";
+    if (text.length > ATTACH_TEXT_MAX_CHARS) text = text.slice(0, ATTACH_TEXT_MAX_CHARS) + "\n…（文件过长，已截断）";
     return text;
   } catch {
     return null;
@@ -558,7 +562,7 @@ function buildPersonaPrompt({
       prompt +=
         content != null
           ? `【博士附上的文件：${path.basename(p)}】\n${content}\n\n`
-          : `【博士附上的文件：${path.basename(p)}】\n（无法以文本读取的文件，路径：${p}）\n\n`;
+          : `【博士附上的文件：${path.basename(p)}】\n（无法内联为文本——可能是二进制文件或过大。请用 Read 工具自己读取：${p}）\n\n`;
     }
   }
 
