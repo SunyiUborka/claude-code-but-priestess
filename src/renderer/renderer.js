@@ -1007,8 +1007,9 @@ async function handleHeaderPointerDown(event) {
   if (event.button !== 0) return;
   if (event.target.closest("button")) return;
   isWindowMoving = true;
-  winMoveStartScreenX = event.screenX;
-  winMoveStartScreenY = event.screenY;
+  // Client space, not screen space: screenX/Y is 0 under KDE Wayland.
+  winMoveStartScreenX = event.clientX;
+  winMoveStartScreenY = event.clientY;
 
   if (IS_WINDOWS) {
     event.preventDefault();
@@ -1044,15 +1045,12 @@ function handleHeaderPointerMove(event) {
   if (!isWindowMoving) return;
   if (!Number.isFinite(winMoveStartX)) return;
 
-  const dx = event.screenX - winMoveStartScreenX;
-  const dy = event.screenY - winMoveStartScreenY;
+  const dx = event.clientX - winMoveStartScreenX;
+  const dy = event.clientY - winMoveStartScreenY;
   if (Math.abs(dx) < MOVE_THRESHOLD && Math.abs(dy) < MOVE_THRESHOLD) return;
 
   event.preventDefault();
-  window.petApi?.movePopover?.({
-    x: winMoveStartX + dx,
-    y: winMoveStartY + dy
-  })?.catch?.(() => {});
+  window.petApi?.movePopoverDelta?.({ dx, dy })?.catch?.(() => {});
 }
 
 // Windows only: wrapper that tears down document-level listeners

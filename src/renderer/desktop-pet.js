@@ -49,8 +49,6 @@ let dragging = false;
 let moved = false;
 let startScreenX = 0;
 let startScreenY = 0;
-let startWindowX = 0;
-let startWindowY = 0;
 let canvasWidth = 0;
 let canvasHeight = 0;
 let action = "idle";
@@ -287,10 +285,10 @@ function scheduleBlink() {
 canvas.addEventListener("pointerdown", (event) => {
   dragging = true;
   moved = false;
-  startScreenX = event.screenX;
-  startScreenY = event.screenY;
-  startWindowX = window.screenX;
-  startWindowY = window.screenY;
+  // Client space: event.screenX/Y and window.screenX/Y both report 0 under
+  // KDE Wayland, so the main process is asked to move by a delta instead.
+  startScreenX = event.clientX;
+  startScreenY = event.clientY;
   try {
     canvas.setPointerCapture(event.pointerId);
   } catch {
@@ -301,10 +299,10 @@ canvas.addEventListener("pointerdown", (event) => {
 
 canvas.addEventListener("pointermove", (event) => {
   if (!dragging) return;
-  const dx = event.screenX - startScreenX;
-  const dy = event.screenY - startScreenY;
+  const dx = event.clientX - startScreenX;
+  const dy = event.clientY - startScreenY;
   if (Math.hypot(dx, dy) > 4) moved = true;
-  if (moved) window.petApi.moveDesktopPet({ x: startWindowX + dx, y: startWindowY + dy });
+  if (moved) window.petApi.moveDesktopPetDelta({ dx, dy });
 });
 
 canvas.addEventListener("pointerup", (event) => {
