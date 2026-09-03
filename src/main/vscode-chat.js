@@ -494,9 +494,8 @@ function dispatchSend(trimmed, context, { userAlreadyShown = false } = {}) {
   // for vibe coding. Tell the user and fall back to companion-mode chat.
   if (provider === "priestess") {
     const errMsg = "内置普瑞赛斯后端不支持终端工具，Vibe Coding 暂只支持 Claude Code / Codex。";
-    history.push({ id: nextId(), role: "system", text: errMsg, ts: Date.now() });
+    pushSystem(errMsg);
     emit({ kind: "status", status: "idle", error: errMsg });
-    emit({ kind: "history", history: history.slice() });
     midTurn = false;
     // Clear queued messages — they can't be processed on this backend.
     if (outboundQueue.length > 0) {
@@ -532,8 +531,11 @@ function dispatchSend(trimmed, context, { userAlreadyShown = false } = {}) {
   // VS Code extension never gets full agent — cap at advisor.
   const vibeCodingMode = rawMode === "agent" ? "advisor" : rawMode;
   // Keep the downgrade visible in history before the assistant reply starts.
+  // pushSystem, not a bare history.push: the bare push never emitted, so the
+  // notice did not reach the panel and the Doctor saw only her saying she
+  // needed approval, with the tray still reading "agent".
   if (rawMode === "agent") {
-    history.push({ id: nextId(), role: "system", text: "VS Code 扩展不支持代理模式，已切换至顾问模式（只读工具）。", ts: Date.now() });
+    pushSystem("VS Code 扩展不支持代理模式，已切换至顾问模式（只读工具）。");
   }
 
   beginAssistant();
@@ -545,7 +547,7 @@ function dispatchSend(trimmed, context, { userAlreadyShown = false } = {}) {
 
   if (!invocation) {
     const errMsg = "No CLI provider available";
-    history.push({ id: nextId(), role: "system", text: errMsg, ts: Date.now() });
+    pushSystem(errMsg);
     emit({ kind: "status", status: "idle", error: errMsg });
     midTurn = false;
     discardAssistant();
