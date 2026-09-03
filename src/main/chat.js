@@ -14,6 +14,13 @@ const priestessProvider = require("./priestess-provider");
 const { spawnCli, spawnCliSync } = require("./cli-spawn");
 const { parseClaudeEffortLevels } = require("./claude-capabilities");
 const {
+  compatibleReasoningEffort,
+  findCatalogModel,
+  parseCodexModelCatalog,
+  reasoningEffortsForModel,
+  resolveCodexModel
+} = require("./codex-model-catalog");
+const {
   classifyCodexRejection,
   codexEventErrorText,
   isCodexModelMetadataWarning
@@ -89,6 +96,7 @@ let claudeModelFallbackInFlight = false;
 // `codexErrorSurfaced` records whether the Doctor already saw it, so the
 // close handler doesn't repeat the same error.
 let codexModelFallbackInFlight = false;
+let codexReasoningFallbackInFlight = false;
 let codexErrorText = "";
 let codexErrorSurfaced = false;
 const MAX_TOOL_OUTPUT_CHARS = 4000;
@@ -797,24 +805,6 @@ function cleanupInvocation(invocation) {
   }
 }
 
-function parseCodexModelCatalog(stdout) {
-  const line = String(stdout || "")
-    .split(/\r?\n/)
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("{") && part.includes("\"models\""));
-  if (!line) return null;
-  try {
-    const parsed = JSON.parse(line);
-    if (!Array.isArray(parsed.models)) return null;
-    const values = parsed.models
-      .filter((model) => model && model.visibility === "list" && model.slug)
-      .map((model) => String(model.slug));
-    return values.length ? new Set(values) : null;
-  } catch {
-    return null;
-  }
-}
-
 function loadCodexModelCatalog() {
   const command = resolveExecutable(PROVIDERS.CODEX);
   if (!command) return null;
@@ -834,7 +824,7 @@ function loadCodexModelCatalog() {
       maxBuffer: 8 * 1024 * 1024
     });
     const values = result.status === 0 ? parseCodexModelCatalog(result.stdout) : null;
-    if (values) {
+    if (values && values.length) {
       codexModelCatalogCache = { command, ts: now, values };
       return values;
     }
@@ -844,11 +834,42 @@ function loadCodexModelCatalog() {
   return null;
 }
 
+// The catalog says which efforts a model accepts. An override the selected
+// model cannot do is corrected to something it can — its own default, else
+// medium, else whatever it offers — rather than sent through and rejected.
+function validatedCodexReasoningEffort() {
+  const selected = String(settings.get("codexReasoningEffort") || "").trim();
+  if (!selected) return "";
+  const catalog = loadCodexModelCatalog();
+  if (!catalog) return selected;
+  const { model, certain } = resolveCodexModel(settings.get("codexModel"));
+  if (!certain) {
+    // No pinned model and none in config.toml: accept anything the catalog
+    // advertises anywhere, and let the CLI have the final say.
+    const advertised = reasoningEffortsForModel(catalog, "", false);
+    if (!advertised.length || advertised.includes(selected)) return selected;
+    settings.set({ codexReasoningEffort: "" });
+    return "";
+  }
+  const compatible = compatibleReasoningEffort(findCatalogModel(catalog, model), selected);
+  if (compatible !== selected) {
+    settings.set({ codexReasoningEffort: compatible });
+    if (lastInvalidCodexReasoningNotice !== selected) {
+      lastInvalidCodexReasoningNotice = selected;
+      pushSystem(
+        `Codex 模型 \`${model}\` 不支持推理强度 \`${selected}\`` +
+        (compatible ? `，已改用 \`${compatible}\`。` : "，已恢复默认。")
+      );
+    }
+  }
+  return compatible;
+}
+
 function validatedCodexModel() {
   const selected = String(settings.get("codexModel") || "").trim();
   if (!selected) return "";
-  const availableModels = loadCodexModelCatalog();
-  if (!availableModels || availableModels.has(selected)) return selected;
+  const catalog = loadCodexModelCatalog();
+  if (!catalog || findCatalogModel(catalog, selected)) return selected;
   settings.set({ codexModel: "" });
   if (lastInvalidCodexModelNotice !== selected) {
     lastInvalidCodexModelNotice = selected;
@@ -2351,6 +2372,7 @@ async function takeScreenshot() {
 // once — silently ignoring it would leave the tray showing a level that never
 // reaches Claude.
 let lastInvalidClaudeReasoningNotice = null;
+let lastInvalidCodexReasoningNotice = null;
 
 function validatedClaudeReasoningEffort() {
   const selected = String(settings.get("claudeReasoningEffort") || "").trim();
@@ -2473,12 +2495,19 @@ function buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript) 
 function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTranscript, sessionPlan) {
   const prompt = buildCodexPrompt(trimmed, agentMode, screenshotPath, sharedTranscript);
   const codexModel = validatedCodexModel();
+  const codexReasoningEffort = validatedCodexReasoningEffort();
+  // `-c` is a parent `codex exec` option, so it has to precede the `resume`
+  // subcommand — same constraint as -C/-s.
+  const reasoningArgs = codexReasoningEffort
+    ? ["-c", `model_reasoning_effort=${JSON.stringify(codexReasoningEffort)}`]
+    : [];
   const resumeSessionId = sessionPlan?.resumeSessionId || null;
   let args;
 
   if (resumeSessionId) {
     args = [
       "exec",
+      ...reasoningArgs,
       "resume",
       "--json",
       "--skip-git-repo-check"
@@ -2507,6 +2536,7 @@ function buildCodexInvocation(trimmed, cwd, agentMode, screenshotPath, sharedTra
     if (codexModel) {
       args.push("--model", codexModel);
     }
+    args.push(...reasoningArgs);
     if (screenshotPath) {
       args.push("-i", screenshotPath);
     }
@@ -2676,6 +2706,7 @@ function dispatchSend(
     codexAutoContinued = false;
     codexContinuationPending = false;
     codexModelFallbackInFlight = false;
+    codexReasoningFallbackInFlight = false;
   }
 
   let currentUserEntry = null;
@@ -3032,6 +3063,38 @@ async function launchProviderTurn({
       return;
     }
 
+    // The catalog is the primary source, but the CLI is the final authority.
+    // If it rejects the selected effort, clear only that override, discard the
+    // now-invalid session, and replay the turn once. Checked before the model
+    // branch so an effort error never clears the independent model preference.
+    const badCodexReasoning = String(settings.get("codexReasoningEffort") || "").trim();
+    if (
+      provider === PROVIDERS.CODEX &&
+      !cancelled &&
+      !codexReasoningFallbackInFlight &&
+      codexRejection === "reasoning" &&
+      badCodexReasoning
+    ) {
+      settings.set({ codexReasoningEffort: "" });
+      sessionIds[PROVIDERS.CODEX] = null;
+      codexReasoningFallbackInFlight = true;
+      const retrySilentKind = silentTurnKind;
+      const retryAttachments = pendingAttachments;
+      if (pendingAssistantId) finalizeAssistant("");
+      pushSystem(`Codex 推理强度 \`${badCodexReasoning}\` 不可用，已恢复默认并重试。`);
+      cleanupInvocation(invocation);
+      currentProcess = null;
+      currentProvider = null;
+      silentTurnKind = retrySilentKind;
+      setImmediate(() => dispatchSend(trimmed, {
+        userAlreadyShown: true,
+        chained: true,
+        silentUser: Boolean(retrySilentKind),
+        resolvedAttachments: retryAttachments
+      }));
+      return;
+    }
+
     // Codex rejected the selected model: drop the override, discard the now
     // invalid session, and replay the turn once. Bounded by the in-flight flag
     // so a persistently failing model can't loop.
@@ -3141,6 +3204,7 @@ async function launchProviderTurn({
     claudeModelFallbackInFlight = false;
     claudeModelInvalid = false;
     codexModelFallbackInFlight = false;
+    codexReasoningFallbackInFlight = false;
     codexErrorText = "";
     codexErrorSurfaced = false;
     finishTurn(
@@ -3153,6 +3217,7 @@ async function launchProviderTurn({
 
 function cancel() {
   codexModelFallbackInFlight = false;
+  codexReasoningFallbackInFlight = false;
   codexErrorText = "";
   codexErrorSurfaced = false;
   if (!currentProcess) return;

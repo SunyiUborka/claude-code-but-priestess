@@ -20,6 +20,13 @@ const chat = require("./chat");
 const persona = require("./persona");
 const platform = require("./platform");
 const proactive = require("./proactive");
+const {
+  codexHomeDir,
+  parseCodexModelCatalog,
+  readCodexConfigValue,
+  reasoningEffortsForModel,
+  resolveCodexModel
+} = require("./codex-model-catalog");
 const priestessProvider = require("./priestess-provider");
 const { spawnCli } = require("./cli-spawn");
 
@@ -1048,6 +1055,8 @@ const MENU_TEXT = {
     personaNotes: "补充校准…",
     modelClaude: "模型（Claude）",
     reasoningClaude: "推理强度（Claude）",
+    reasoningCodex: "推理强度（Codex）",
+    defaultReasoningValue: (effort) => `默认（CLI/config：${effort}）`,
     defaultReasoning: "默认（CLI/config）",
     reasoningLevel: (effort) => ({
       none: "None · 不推理",
@@ -1125,6 +1134,8 @@ const MENU_TEXT = {
     personaNotes: "Persona supplement…",
     modelClaude: "Model (Claude)",
     reasoningClaude: "Reasoning effort (Claude)",
+    reasoningCodex: "Reasoning effort (Codex)",
+    defaultReasoningValue: (effort) => `Default (CLI/config: ${effort})`,
     defaultReasoning: "Default (CLI/config)",
     reasoningLevel: (effort) => ({
       none: "None",
@@ -1205,6 +1216,8 @@ const MENU_TEXT = {
     personaNotes: "補足校准…",
     modelClaude: "モデル（Claude）",
     reasoningClaude: "推論強度（Claude）",
+    reasoningCodex: "推論強度（Codex）",
+    defaultReasoningValue: (effort) => `デフォルト（CLI/config：${effort}）`,
     defaultReasoning: "デフォルト（CLI/config）",
     reasoningLevel: (effort) => ({
       none: "None・推論なし",
@@ -1397,38 +1410,20 @@ const MODEL_PRESETS = {
 let codexModelPresetCache = {
   command: null,
   ts: 0,
+  catalog: null,
   presets: null,
   refreshing: false
 };
+
+// The reasoning submenu needs the catalog entries, not just the menu labels.
+function codexCatalogForMenu() {
+  return codexModelPresetCache.catalog;
+}
 
 function modelSettingKey(provider) {
   if (provider === "codex") return "codexModel";
   if (provider === "opencode") return "opencodeModel";
   return "claudeModel";
-}
-
-function parseCodexModelCatalog(stdout) {
-  const raw = String(stdout || "").trim();
-  const line = raw
-    .split(/\r?\n/)
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("{") && part.includes("\"models\""));
-  for (const candidate of [raw, line].filter(Boolean)) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (!Array.isArray(parsed.models)) continue;
-      const models = parsed.models
-        .filter((model) => model && model.visibility === "list" && model.slug)
-        .map((model) => ({
-          label: model.display_name || model.slug,
-          value: model.slug
-        }));
-      if (models.length) return models;
-    } catch {
-      /* try next candidate */
-    }
-  }
-  return null;
 }
 
 function codexDefaultPreset() {
@@ -1437,7 +1432,7 @@ function codexDefaultPreset() {
 
 function readCodexModelPresetsFromFile() {
   try {
-    const file = path.join(os.homedir(), ".codex", "models_cache.json");
+    const file = path.join(codexHomeDir(), "models_cache.json");
     if (!fs.existsSync(file)) return null;
     return parseCodexModelCatalog(fs.readFileSync(file, "utf8"));
   } catch {
@@ -1445,12 +1440,16 @@ function readCodexModelPresetsFromFile() {
   }
 }
 
-function setCodexModelPresetCache(command, presets) {
-  if (!presets || !presets.length) return null;
+function setCodexModelPresetCache(command, catalog) {
+  if (!catalog || !catalog.length) return null;
   codexModelPresetCache = {
     command,
     ts: Date.now(),
-    presets: [codexDefaultPreset(), ...presets],
+    catalog,
+    presets: [
+      codexDefaultPreset(),
+      ...catalog.map((model) => ({ label: model.displayName, value: model.slug }))
+    ],
     refreshing: false
   };
   return codexModelPresetCache.presets;
@@ -1540,6 +1539,44 @@ function modelPresetLabel(preset) {
 // Claude's `--effort` levels vary by CLI version, so the submenu is built from
 // what the installed binary advertised (see probeClaudeEffortLevels in chat.js)
 // and stays hidden entirely on a CLI that has no such flag.
+// Which efforts a Codex model accepts comes from the catalog. With no model
+// pinned here or in config.toml the catalog cannot say which one will run, so
+// everything it advertises anywhere is offered and the CLI has the final say.
+function buildCodexReasoningMenuItems() {
+  const availability = chat.getProviderAvailability({ refresh: false });
+  if (availability.activeProvider !== "codex") return [];
+  if (!codexModelPresetsForMenu()) return [];
+  const { model, certain } = resolveCodexModel(settings.get("codexModel"));
+  const supported = reasoningEffortsForModel(codexCatalogForMenu(), model, certain);
+  const current = String(settings.get("codexReasoningEffort") || "");
+  if (!supported.length && !current) return [];
+  const configuredEffort = readCodexConfigValue("model_reasoning_effort");
+  // A level stored before a model switch stays visible, so the Doctor sees
+  // what is selected instead of a submenu with nothing checked.
+  const visible = current && !supported.includes(current)
+    ? [...supported, current]
+    : supported;
+  return [{
+    label: mt("reasoningCodex"),
+    submenu: [
+      {
+        label: configuredEffort
+          ? mt("defaultReasoningValue", mt("reasoningLevel", configuredEffort))
+          : mt("defaultReasoning"),
+        type: "radio",
+        checked: !current,
+        click: () => settings.set({ codexReasoningEffort: "" })
+      },
+      ...visible.map((effort) => ({
+        label: mt("reasoningLevel", effort),
+        type: "radio",
+        checked: current === effort,
+        click: () => settings.set({ codexReasoningEffort: effort })
+      }))
+    ]
+  }];
+}
+
 function buildClaudeReasoningMenuItems() {
   const availability = chat.getProviderAvailability({ refresh: false });
   if (availability.activeProvider !== "claude") return [];
@@ -1711,6 +1748,7 @@ function buildContextMenu() {
     buildUsageBackendMenuItem(),
     ...buildModelMenuItems(),
     ...buildClaudeReasoningMenuItems(),
+    ...buildCodexReasoningMenuItems(),
     {
       label: mt("priestessSettings"),
       click: () => openPriestessSettings()

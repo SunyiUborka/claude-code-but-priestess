@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { app } = require("electron");
 const { isClaudeReasoningEffort } = require("./claude-capabilities");
+const { isReasoningEffort } = require("./codex-model-catalog");
 
 const DEFAULTS = Object.freeze({
   chatProvider: process.platform === "win32" ? "codex" : "claude",
@@ -17,6 +18,10 @@ const DEFAULTS = Object.freeze({
   // CLI's own default. Which levels exist is discovered from `claude --help`,
   // so an override the installed CLI doesn't expose is cleared on use.
   claudeReasoningEffort: "",
+  // Same for Codex, passed as `-c model_reasoning_effort=…`. Which levels a
+  // model accepts comes from the Codex model catalog, so an incompatible
+  // choice is corrected when the model changes.
+  codexReasoningEffort: "",
   // Built-in "Priestess" backend — she speaks to an OpenAI-compatible server
   // directly (no local CLI needed). Defaults to a local LiteLLM proxy. The
   // API key and URL live ONLY in this local settings.json (userData); they
@@ -133,6 +138,7 @@ function get(key) {
 // (see the migration in `load`) or for upstream-only keys.
 const VALIDATORS = {
   claudeReasoningEffort: isClaudeReasoningEffort,
+  codexReasoningEffort: isReasoningEffort,
   chatProvider: (v) => ["claude", "codex", "priestess", "opencode"].includes(v),
   menuLanguage: (v) => ["system", "zh", "en", "ja"].includes(v),
   agentMode: (v) => typeof v === "boolean",
