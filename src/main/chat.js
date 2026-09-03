@@ -12,6 +12,11 @@ const persona = require("./persona");
 const skills = require("./skills");
 const priestessProvider = require("./priestess-provider");
 const { spawnCli, spawnCliSync } = require("./cli-spawn");
+const {
+  classifyCodexRejection,
+  codexEventErrorText,
+  isCodexModelMetadataWarning
+} = require("./codex-errors");
 
 const PROVIDERS = Object.freeze({
   CLAUDE: "claude",
@@ -77,6 +82,14 @@ let resumeRetryInFlight = false;
 // the CLI default and retry once. `claudeModelFallbackInFlight` guards the loop.
 let claudeModelInvalid = false;
 let claudeModelFallbackInFlight = false;
+// Codex rejected the selected model: clear the override and replay once.
+// `codexModelFallbackInFlight` guards the loop. `codexErrorText` accumulates
+// what the CLI reported on the stream (stderr is often empty), and
+// `codexErrorSurfaced` records whether the Doctor already saw it, so the
+// close handler doesn't repeat the same error.
+let codexModelFallbackInFlight = false;
+let codexErrorText = "";
+let codexErrorSurfaced = false;
 const MAX_TOOL_OUTPUT_CHARS = 4000;
 let codexModelCatalogCache = { command: null, ts: 0, values: null };
 let lastInvalidCodexModelNotice = "";
@@ -205,6 +218,14 @@ function codexSessionRotationReason(sessionId) {
 
 function providerSessionPlan(provider) {
   const savedSessionId = sessionIds[provider] || null;
+  // Open Code captures its sessionID off the stream (kept for when resume
+  // lands) but `buildOpenCodeInvocation` cannot replay it — `opencode run`
+  // always starts fresh. Reporting a resumable session anyway made the caller
+  // trim the shared transcript to bridge-only, so from the second turn on she
+  // got neither the CLI session nor the history. Report no session instead.
+  if (provider === PROVIDERS.OPENCODE) {
+    return { resumeSessionId: null, rotationReason: "" };
+  }
   if (provider !== PROVIDERS.CODEX) {
     return { resumeSessionId: savedSessionId, rotationReason: "" };
   }
@@ -1968,6 +1989,16 @@ function codexSessionIdFromEvent(event) {
   );
 }
 
+function rememberCodexError(text) {
+  const message = String(text || "").trim();
+  if (!message) return;
+  if (!codexErrorText) {
+    codexErrorText = message.slice(0, 4000);
+  } else if (!codexErrorText.includes(message)) {
+    codexErrorText = `${codexErrorText}\n${message}`.slice(-4000);
+  }
+}
+
 function handleCodexStreamEvent(event) {
   if (!event || typeof event !== "object") return;
 
@@ -1976,14 +2007,35 @@ function handleCodexStreamEvent(event) {
     rememberProviderSession(PROVIDERS.CODEX, codexSessionIdFromEvent(event));
   }
 
-  if (type.includes("error")) {
-    const errorText = extractCodexText(event) || event.message || event.error;
-    if (errorText) pushSystem(`Codex reported an error: ${String(errorText).slice(0, 400)}`);
+  const item = event.item || event.event?.item || null;
+  const itemType = item?.type || event.kind || "";
+  const eventErrorText = codexEventErrorText(event);
+  const isErrorEvent =
+    Boolean(eventErrorText) ||
+    type.includes("error") ||
+    type.endsWith(".failed") ||
+    String(itemType).includes("error");
+  if (isErrorEvent) {
+    const errorText =
+      eventErrorText ||
+      extractCodexText(event) ||
+      (typeof event.message === "string" ? event.message : "") ||
+      (typeof event.error === "string" ? event.error : "");
+    if (!errorText) return;
+    const rejection = classifyCodexRejection(errorText);
+    // "model metadata … not found" is a harmless warning on its own — only
+    // surface it when it comes with a real rejection.
+    if (isCodexModelMetadataWarning(errorText) && !rejection) return;
+    rememberCodexError(errorText);
+    if (!rejection) {
+      pushSystem(`Codex reported an error: ${String(errorText).slice(0, 400)}`);
+      codexErrorSurfaced = true;
+    }
+    // A classified rejection is handled by the close handler, which replays
+    // the turn with the bad override cleared.
     return;
   }
 
-  const item = event.item || event.event?.item || null;
-  const itemType = item?.type || event.kind || "";
   const toolName =
     event.name ||
     event.tool_name ||
@@ -2533,7 +2585,7 @@ function send(text, attachments) {
 
 function dispatchSend(
   trimmed,
-  { userAlreadyShown = false, chained = false, forceScreenshot = false, silentUser = false, attachments = [] } = {}
+  { userAlreadyShown = false, chained = false, forceScreenshot = false, silentUser = false, attachments = [], resolvedAttachments = null } = {}
 ) {
   if (currentProcess || turnLaunching) return { ok: false, reason: "busy" };
 
@@ -2547,14 +2599,22 @@ function dispatchSend(
   // Attachments belong only to this real turn; silent self-turns never carry any.
   // Backend copies get downscaled (faster/cheaper vision); the bubble keeps the
   // full original, which was attached to the history entry above.
+  //
+  // A retry replays a turn whose images were downscaled already, and hands them
+  // back through `resolvedAttachments`. Re-resolving them would be worse than
+  // wasteful: the resolver wipes its temp directory the moment it has anything
+  // to downscale, which would delete the very files being replayed.
   pendingAttachments = silentTurnKind
     ? []
-    : resolveAttachmentsForBackend(Array.isArray(attachments) ? attachments : []);
+    : Array.isArray(resolvedAttachments)
+      ? resolvedAttachments
+      : resolveAttachmentsForBackend(Array.isArray(attachments) ? attachments : []);
 
   // A genuine new user turn — reset the Codex auto-continue guard.
   if (!chained) {
     codexAutoContinued = false;
     codexContinuationPending = false;
+    codexModelFallbackInFlight = false;
   }
 
   let currentUserEntry = null;
@@ -2796,6 +2856,13 @@ async function launchProviderTurn({
       env: spawnEnv,
     });
     if (invocation.stdin != null) {
+      // A prompt is tens of KB, so it won't clear the pipe buffer in one go. If
+      // the CLI dies before draining it (not logged in, bad flag, instant
+      // crash), the rest of the write lands as an async EPIPE on stdin — which
+      // the try/catch here cannot see, and an unhandled stream error takes the
+      // whole main process down. The close/error handlers already report the
+      // dead turn, so swallowing it is enough.
+      proc.stdin.on("error", () => {});
       proc.stdin.end(invocation.stdin);
     }
   } catch (error) {
@@ -2836,7 +2903,7 @@ async function launchProviderTurn({
   });
 
   proc.on("error", (error) => {
-    if (currentProcess !== proc) return;
+    if (currentProcess && currentProcess !== proc) return;
     cleanupInvocation(invocation);
     pushSystem(`\`${providerLabel(provider)}\` process error: ${error.message}`);
     finalizeAssistant("");
@@ -2854,7 +2921,7 @@ async function launchProviderTurn({
   });
 
   proc.on("close", (code) => {
-    if (currentProcess !== proc) return;
+    if (currentProcess && currentProcess !== proc) return;
     if (buffer.trim()) {
       try {
         handleProviderStreamEvent(provider, JSON.parse(buffer.trim()));
@@ -2865,6 +2932,10 @@ async function launchProviderTurn({
     }
 
     const stderrText = stderrBuffer.trim();
+    const codexRejection =
+      provider === PROVIDERS.CODEX
+        ? classifyCodexRejection(`${codexErrorText}\n${stderrText}`)
+        : "";
     const cancelled = cancelRequested;
     cancelRequested = false;
 
@@ -2881,6 +2952,10 @@ async function launchProviderTurn({
       resumeRetryInFlight = true;
       claudeResultErrored = false;
       const retrySilentKind = silentTurnKind;
+      // Read now, not inside the callback: pendingAttachments is module state
+      // that the next turn overwrites, so a deferred read can replay the wrong
+      // images — or none.
+      const retryAttachments = pendingAttachments;
       if (pendingAssistantId) finalizeAssistant(""); // clears the empty bubble
       cleanupInvocation(invocation);
       currentProcess = null;
@@ -2890,7 +2965,40 @@ async function launchProviderTurn({
       setImmediate(() => dispatchSend(trimmed, {
         userAlreadyShown: true,
         chained: true,
-        silentUser: Boolean(retrySilentKind)
+        silentUser: Boolean(retrySilentKind),
+        resolvedAttachments: retryAttachments
+      }));
+      return;
+    }
+
+    // Codex rejected the selected model: drop the override, discard the now
+    // invalid session, and replay the turn once. Bounded by the in-flight flag
+    // so a persistently failing model can't loop.
+    const badCodexModel = String(settings.get("codexModel") || "").trim();
+    if (
+      provider === PROVIDERS.CODEX &&
+      !cancelled &&
+      !codexModelFallbackInFlight &&
+      codexRejection === "model" &&
+      badCodexModel
+    ) {
+      settings.set({ codexModel: "" });
+      sessionIds[PROVIDERS.CODEX] = null;
+      codexModelFallbackInFlight = true;
+      const retrySilentKind = silentTurnKind;
+      // Same as above: read the resolved attachments before the callback runs.
+      const retryAttachments = pendingAttachments;
+      if (pendingAssistantId) finalizeAssistant("");
+      pushSystem(`Codex 模型 \`${badCodexModel}\` 不可用，已恢复默认并重试。`);
+      cleanupInvocation(invocation);
+      currentProcess = null;
+      currentProvider = null;
+      silentTurnKind = retrySilentKind;
+      setImmediate(() => dispatchSend(trimmed, {
+        userAlreadyShown: true,
+        chained: true,
+        silentUser: Boolean(retrySilentKind),
+        resolvedAttachments: retryAttachments
       }));
       return;
     }
@@ -2909,6 +3017,8 @@ async function launchProviderTurn({
       claudeModelFallbackInFlight = true;
       claudeModelInvalid = false;
       const retrySilentKind = silentTurnKind;
+      // Same as above: read the resolved attachments before the callback runs.
+      const retryAttachments = pendingAttachments;
       if (pendingAssistantId) finalizeAssistant("");
       pushSystem(`Claude 模型 \`${badClaudeModel}\` 当前账号不可用，已切回默认并重试。`);
       cleanupInvocation(invocation);
@@ -2918,7 +3028,8 @@ async function launchProviderTurn({
       setImmediate(() => dispatchSend(trimmed, {
         userAlreadyShown: true,
         chained: true,
-        silentUser: Boolean(retrySilentKind)
+        silentUser: Boolean(retrySilentKind),
+        resolvedAttachments: retryAttachments
       }));
       return;
     }
@@ -2945,10 +3056,16 @@ async function launchProviderTurn({
     }
 
     if (code !== 0 && code !== null) {
-      const stderrSummary = stderrText.slice(-400);
+      // Codex often exits non-zero with an empty stderr — the real message came
+      // over the stream, so fall back to what we collected there.
+      const stderrSummary =
+        (stderrText || (provider === PROVIDERS.CODEX && !codexErrorSurfaced ? codexErrorText : ""))
+          .slice(-400);
       pushSystem(
         `\`${providerLabel(provider)}\` exited with code ${code}.${stderrSummary ? "\n" + stderrSummary : ""}`
       );
+    } else if (provider === PROVIDERS.CODEX && codexErrorText && !codexErrorSurfaced) {
+      pushSystem(`Codex reported an error: ${codexErrorText.slice(0, 400)}`);
     } else if (claudeResultErrored) {
       pushSystem(
         "Claude 返回了一个空的错误回复。请再试一次，或确认 `claude` CLI 已登录且额度未用尽。"
@@ -2962,6 +3079,9 @@ async function launchProviderTurn({
     resumeRetryInFlight = false;
     claudeModelFallbackInFlight = false;
     claudeModelInvalid = false;
+    codexModelFallbackInFlight = false;
+    codexErrorText = "";
+    codexErrorSurfaced = false;
     finishTurn(
       cancelled
         ? { cancelled: true, silent: silentTurn || undefined }
@@ -2971,13 +3091,26 @@ async function launchProviderTurn({
 }
 
 function cancel() {
+  codexModelFallbackInFlight = false;
+  codexErrorText = "";
+  codexErrorSurfaced = false;
   if (!currentProcess) return;
   cancelRequested = true;
+  const proc = currentProcess;
+  currentProcess = null; // unblock future sends immediately
   try {
-    currentProcess.kill("SIGTERM");
+    proc.kill("SIGTERM");
   } catch (error) {
     console.warn("chat: failed to kill subprocess", error);
   }
+  // Force-kill after 3s if SIGTERM was ignored (defunct child, stuck I/O).
+  setTimeout(() => {
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }, 3000).unref();
 }
 
 function clear() {
