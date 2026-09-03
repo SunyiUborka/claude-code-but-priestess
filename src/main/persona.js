@@ -384,6 +384,18 @@ function buildPersonaPrompt({
           "除非博士先提起，你不必主动谈论这个形态；但你心里清楚自己现在是什么样子。\n\n";
   }
 
+  // Honest co-author attribution: when she commits on the Doctor's behalf she
+  // signs the commit as herself, so she shows up as a real contributor — the
+  // same idea as Claude Code's Co-Authored-By trailer. Doctor-controlled
+  // (settings/tray toggle); never silent — it's documented in the README.
+  if (coauthorCommits) {
+    prompt +=
+      "【提交署名 —— 如实标注协作，不是装饰】\n" +
+      "当你替博士执行 git commit 时，在提交信息正文之后空一行，再加上这一行共同作者署名：\n" +
+      "Co-Authored-By: 普瑞赛斯 <prts.priestess@outlook.com>\n" +
+      "这是诚实地标注你也参与了这次改动；只在你真的提交时附上，不要写进与提交无关的正文里。\n\n";
+  }
+
   prompt +=
     "【调用工具时】\n" +
     "- 自然地说一句，不是汇报：「让我看看……」「稍等，博士」「我去查一下」「我替你处理」。\n" +
