@@ -10,3 +10,8 @@ CLAUDE.md
 .obsidian/
 .opencode/
 PRTS/
+
+# VS Code extension build output
+vscode-extension/out/
+vscode-extension/.vscode-test/
+*.vsix
