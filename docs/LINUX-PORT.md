@@ -34,35 +34,21 @@ after disabling its own `sync-upstream.yml` on 2026-06-24.
 | Japanese menu language | 59a9bec | done |
 | No in-app updater: `updater.js` and `update-progress.*` dropped, `buildUpdateMenuItems` returns nothing | 486c2e1 | done |
 
+| OpenCode backend, a fourth CLI provider | 486c2e1 | done |
+| Linux screenshot tools: spectacle, gnome-screenshot, grim, import, maim, scrot | 486c2e1 | done |
+| Delta-based window and pet dragging, fixing KDE Wayland | 486c2e1 | done |
+| `XDG_SESSION_TYPE` / `XDG_CURRENT_DESKTOP` session detection | a9054f7 | done |
+| `easter_egg` skill | a25ea7c | done |
+| Packaging identity: AppImage/deb/rpm targets, appId, publish target | a374d82 | done |
+
 ## Still to carry
 
 | item | source | size |
 |---|---|---|
-| OpenCode backend (fourth provider) | 486c2e1 | ~230 lines in `chat.js`, menu bits in `main.js` |
-| `XDG_SESSION_TYPE` platform detection, replacing tray-bounds inference | a9054f7 | 142 lines, conflicts on this base |
-| KDE window/pet drag: `popover:move-delta` | 486c2e1 | `preload.js`, `main.js`, `desktop-pet.{js,css}`, `renderer.js`, `styles.css` |
-| Linux screenshot tools, NVM detection | 486c2e1 | `chat.js` |
-| `easter_egg` skill (the `skills.js` half; the `chat.js` trigger is already in) | a25ea7c | ~23 lines |
-| Branding: package name, appId, productName, publish owner, AppImage/deb/rpm targets, `asarUnpack` | a374d82, 486c2e1 | `package.json` |
+| NVM detection when the CLI lives under a node version manager | 486c2e1 | `chat.js` |
 | Wayland start gate (`PRTS_SHOW_ON_START`) — partially present, needs checking against the original fix | abfbdb7 | ~9 lines |
-
-## Decisions to re-apply from the 2026-09-03 port work
-
-These are not upstream features; they are choices made while porting upstream
-into the fork, and they are worth keeping here:
-
-- `settings.js` validator table: `chatProvider` must include `opencode`,
-  `menuLanguage` must include `ja`. Upstream's table lists neither, and copying
-  it verbatim silently narrows both back to upstream's set.
-- `vscode-extension/src/ws-client.ts`: `APP_NAMES` must lead with this build's
-  Electron app name, or the extension never finds `ws-port.json` and cannot
-  connect at all.
-- `vscode-chat.js`: upstream caps the editor client at advisor. That cap is
-  lifted here, with the tier shown in the panel's status line so full access is
-  never in effect invisibly.
-- `vscode-chat.js`: three system notices use a bare `history.push` instead of
-  `pushSystem`, so they never reach the panel. Still broken upstream as of
-  c05e33c — worth a pull request rather than only a local fix.
+| Compositor-native window drag on KDE (`-webkit-app-region: drag` behind a class) — the delta move already fixes the bug this worked around | 486c2e1 | `renderer.js`, `desktop-pet.{js,css,html}`, `styles.css` |
+| Resize still measures in screen space; untouched upstream and in the fork | — | `renderer.js` |
 
 ## Deferred, not dropped
 
