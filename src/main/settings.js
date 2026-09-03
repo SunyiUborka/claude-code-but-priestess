@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { app } = require("electron");
+const { isClaudeReasoningEffort } = require("./claude-capabilities");
 
 const DEFAULTS = Object.freeze({
   chatProvider: process.platform === "win32" ? "codex" : "claude",
@@ -8,6 +9,14 @@ const DEFAULTS = Object.freeze({
   // string = let the CLI / account pick its default.
   claudeModel: "",
   codexModel: "",
+  // Open Code has a `--model` flag, but the tray preset list currently offers
+  // only "Default (opencode config)". Declared here so the key is a real
+  // setting rather than one that survives only because set() is permissive.
+  opencodeModel: "",
+  // Optional Claude reasoning override, passed as `--effort`. Empty keeps the
+  // CLI's own default. Which levels exist is discovered from `claude --help`,
+  // so an override the installed CLI doesn't expose is cleared on use.
+  claudeReasoningEffort: "",
   // Built-in "Priestess" backend — she speaks to an OpenAI-compatible server
   // directly (no local CLI needed). Defaults to a local LiteLLM proxy. The
   // API key and URL live ONLY in this local settings.json (userData); they
@@ -112,12 +121,52 @@ function get(key) {
   return cache[key];
 }
 
+// Value validators for the keys where only a fixed set is meaningful. These
+// deliberately describe THIS fork's feature set, not upstream's: `opencode` is
+// a backend only this fork has, `ja` a menu language only this fork kept, and
+// `agentMode` is still the permission model here (upstream replaced it with a
+// three-state vibeCodingMode, which has not been adopted). Copying upstream's
+// table verbatim would silently narrow all three back to upstream's choices.
+//
+// Keys absent from DEFAULTS never reach a validator — `set` rejects them on the
+// whitelist first — so there is no entry for the migrated `desktopPetSize`
+// (see the migration in `load`) or for upstream-only keys.
+const VALIDATORS = {
+  claudeReasoningEffort: isClaudeReasoningEffort,
+  chatProvider: (v) => ["claude", "codex", "priestess", "opencode"].includes(v),
+  menuLanguage: (v) => ["system", "zh", "en", "ja"].includes(v),
+  agentMode: (v) => typeof v === "boolean",
+  theme: (v) => ["system", "light", "dark"].includes(v),
+  outfit: (v) => ["formal", "casual"].includes(v),
+  updateChannel: (v) => ["stable", "prerelease"].includes(v)
+};
+
+// Only declared keys carrying a valid value are written. Everything the tray
+// and the renderer legitimately set passes; what gets rejected here is a
+// hand-edited settings.json or a caller bug, which is why a console warning is
+// the right level of noise — no legitimate in-app action can land here.
 function set(patch) {
-  cache = { ...cache, ...patch };
+  const sanitized = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (!(key in DEFAULTS)) {
+      console.warn("settings: rejected unknown key", key);
+      continue;
+    }
+    const validator = VALIDATORS[key];
+    if (validator && !validator(value)) {
+      console.warn("settings: rejected invalid value for", key, value);
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  // Nothing survived — don't rewrite the file or wake subscribers.
+  if (Object.keys(sanitized).length === 0) return;
+  cache = { ...cache, ...sanitized };
   persist();
   for (const sub of subscribers) {
     try {
-      sub(cache, patch);
+      // Subscribers see only what was actually applied, never a rejected value.
+      sub(cache, sanitized);
     } catch (error) {
       console.warn("settings subscriber threw", error);
     }

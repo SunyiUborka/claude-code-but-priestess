@@ -12,6 +12,7 @@ const persona = require("./persona");
 const skills = require("./skills");
 const priestessProvider = require("./priestess-provider");
 const { spawnCli, spawnCliSync } = require("./cli-spawn");
+const { parseClaudeEffortLevels } = require("./claude-capabilities");
 const {
   classifyCodexRejection,
   codexEventErrorText,
@@ -563,6 +564,35 @@ function canSpawnExecutable(candidate) {
   }
 }
 
+// Which `--effort` levels the installed Claude CLI actually exposes. Read out
+// of `claude --help` because the flag and its choices vary by version — older
+// CLIs have neither, and the menu stays hidden for them. Cached per binary so
+// the probe does not run on every availability scan.
+let claudeEffortProbeCache = { command: null, levels: [] };
+
+function probeClaudeEffortLevels(command) {
+  if (!command) return [];
+  if (claudeEffortProbeCache.command === command) {
+    return claudeEffortProbeCache.levels;
+  }
+  let levels = [];
+  try {
+    const result = spawnCliSync(command, ["--help"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5000,
+      maxBuffer: 1024 * 1024
+    });
+    if (!result.error && result.status === 0) {
+      levels = parseClaudeEffortLevels(`${result.stdout || ""}\n${result.stderr || ""}`);
+    }
+  } catch {
+    /* Older Claude CLIs simply keep the effort menu hidden. */
+  }
+  claudeEffortProbeCache = { command, levels };
+  return levels;
+}
+
 function detectProvider(provider, previous = null) {
   const normalized = normalizeProvider(provider);
   for (const candidate of executableCandidates(normalized)) {
@@ -584,7 +614,9 @@ function detectProvider(provider, previous = null) {
           label: providerLabel(normalized),
           shortLabel: providerShortLabel(normalized),
           available: true,
-          command: candidate
+          command: candidate,
+          effortLevels:
+            normalized === PROVIDERS.CLAUDE ? probeClaudeEffortLevels(candidate) : []
         };
       }
     } catch {
@@ -614,7 +646,8 @@ function detectProvider(provider, previous = null) {
     label: providerLabel(normalized),
     shortLabel: providerShortLabel(normalized),
     available: false,
-    command: null
+    command: null,
+    effortLevels: []
   };
 }
 
@@ -629,7 +662,8 @@ function detectPriestessProvider() {
     label: providerLabel(PROVIDERS.PRIESTESS),
     shortLabel: providerShortLabel(PROVIDERS.PRIESTESS),
     available,
-    command: null
+    command: null,
+    effortLevels: []
   };
 }
 
@@ -657,7 +691,8 @@ function emptyProviderAvailability() {
     label: providerLabel(provider),
     shortLabel: providerShortLabel(provider),
     available: false,
-    command: null
+    command: null,
+    effortLevels: []
   });
   return {
     [PROVIDERS.CLAUDE]: empty(PROVIDERS.CLAUDE),
@@ -728,7 +763,7 @@ function getProviderAvailability(options = {}) {
       [PROVIDERS.CLAUDE]: { ...availability[PROVIDERS.CLAUDE] },
       [PROVIDERS.CODEX]: { ...availability[PROVIDERS.CODEX] },
       [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) },
-      [PROVIDERS.OPENCODE]: { ...(availability[PROVIDERS.OPENCODE] || { provider: PROVIDERS.OPENCODE, label: providerLabel(PROVIDERS.OPENCODE), shortLabel: providerShortLabel(PROVIDERS.OPENCODE), available: false, command: null }) }
+      [PROVIDERS.OPENCODE]: { ...(availability[PROVIDERS.OPENCODE] || { provider: PROVIDERS.OPENCODE, label: providerLabel(PROVIDERS.OPENCODE), shortLabel: providerShortLabel(PROVIDERS.OPENCODE), available: false, command: null, effortLevels: [] }) }
     }
   };
 }
@@ -2311,6 +2346,28 @@ async function takeScreenshot() {
   return null;
 }
 
+// The CLI is the final authority on which effort levels exist. If the stored
+// override is not among the ones this binary advertises, clear it and say so
+// once — silently ignoring it would leave the tray showing a level that never
+// reaches Claude.
+let lastInvalidClaudeReasoningNotice = null;
+
+function validatedClaudeReasoningEffort() {
+  const selected = String(settings.get("claudeReasoningEffort") || "").trim();
+  if (!selected) return "";
+  const supported = ensureProviderAvailability()[PROVIDERS.CLAUDE]?.effortLevels || [];
+  if (supported.includes(selected)) return selected;
+  settings.set({ claudeReasoningEffort: "" });
+  if (lastInvalidClaudeReasoningNotice !== selected) {
+    lastInvalidClaudeReasoningNotice = selected;
+    pushSystem(
+      `Claude Code does not expose the selected \`${selected}\` effort level; ` +
+      "using its default instead."
+    );
+  }
+  return "";
+}
+
 function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscript, sessionPlan) {
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
   const includeLongMemory = !longMemoryDormant || memoryRecallRequested;
@@ -2350,6 +2407,10 @@ function buildClaudeInvocation(trimmed, agentMode, screenshotPath, sharedTranscr
   const claudeModel = String(settings.get("claudeModel") || "").trim();
   if (claudeModel) {
     args.push("--model", claudeModel);
+  }
+  const claudeReasoningEffort = validatedClaudeReasoningEffort();
+  if (claudeReasoningEffort) {
+    args.push("--effort", claudeReasoningEffort);
   }
 
   if (agentMode) {

@@ -1047,6 +1047,18 @@ const MENU_TEXT = {
     priestessSettings: "内置普瑞赛斯设置…",
     personaNotes: "补充校准…",
     modelClaude: "模型（Claude）",
+    reasoningClaude: "推理强度（Claude）",
+    defaultReasoning: "默认（CLI/config）",
+    reasoningLevel: (effort) => ({
+      none: "None · 不推理",
+      minimal: "Minimal · 最轻",
+      low: "Low · 轻量",
+      medium: "Medium · 均衡",
+      high: "High · 深入",
+      xhigh: "XHigh · 很高",
+      max: "Max · 最大",
+      ultra: "Ultra · 极限"
+    })[effort] || effort,
     modelCodex: "模型（Codex）",
     defaultClaude: "默认（CLI/账户）",
     defaultCodex: "默认（CLI/config）",
@@ -1112,6 +1124,18 @@ const MENU_TEXT = {
     priestessSettings: "Built-in Priestess settings…",
     personaNotes: "Persona supplement…",
     modelClaude: "Model (Claude)",
+    reasoningClaude: "Reasoning effort (Claude)",
+    defaultReasoning: "Default (CLI/config)",
+    reasoningLevel: (effort) => ({
+      none: "None",
+      minimal: "Minimal",
+      low: "Low",
+      medium: "Medium",
+      high: "High",
+      xhigh: "XHigh",
+      max: "Max",
+      ultra: "Ultra"
+    })[effort] || effort,
     modelCodex: "Model (Codex)",
     defaultClaude: "Default (CLI/account)",
     defaultCodex: "Default (CLI/config)",
@@ -1180,6 +1204,18 @@ const MENU_TEXT = {
     priestessSettings: "内蔵プリーシス設定…",
     personaNotes: "補足校准…",
     modelClaude: "モデル（Claude）",
+    reasoningClaude: "推論強度（Claude）",
+    defaultReasoning: "デフォルト（CLI/config）",
+    reasoningLevel: (effort) => ({
+      none: "None・推論なし",
+      minimal: "Minimal・最小",
+      low: "Low・低",
+      medium: "Medium・中",
+      high: "High・高",
+      xhigh: "XHigh・とても高い",
+      max: "Max・最大",
+      ultra: "Ultra・極限"
+    })[effort] || effort,
     modelCodex: "モデル（Codex）",
     defaultClaude: "デフォルト（CLI/アカウント）",
     defaultCodex: "デフォルト（CLI/config）",
@@ -1501,6 +1537,39 @@ function modelPresetLabel(preset) {
 
 // A "Model" submenu for whichever backend is active. Returned as an array so it
 // can be spread into the menu (empty when no backend / presets are available).
+// Claude's `--effort` levels vary by CLI version, so the submenu is built from
+// what the installed binary advertised (see probeClaudeEffortLevels in chat.js)
+// and stays hidden entirely on a CLI that has no such flag.
+function buildClaudeReasoningMenuItems() {
+  const availability = chat.getProviderAvailability({ refresh: false });
+  if (availability.activeProvider !== "claude") return [];
+  const supported = availability.providers.claude?.effortLevels || [];
+  if (!supported.length) return [];
+  const current = String(settings.get("claudeReasoningEffort") || "");
+  // A level stored before a CLI downgrade stays visible so the Doctor can see
+  // what is selected instead of a menu with nothing checked.
+  const visible = current && !supported.includes(current)
+    ? [...supported, current]
+    : supported;
+  return [{
+    label: mt("reasoningClaude"),
+    submenu: [
+      {
+        label: mt("defaultReasoning"),
+        type: "radio",
+        checked: !current,
+        click: () => settings.set({ claudeReasoningEffort: "" })
+      },
+      ...visible.map((effort) => ({
+        label: mt("reasoningLevel", effort),
+        type: "radio",
+        checked: current === effort,
+        click: () => settings.set({ claudeReasoningEffort: effort })
+      }))
+    ]
+  }];
+}
+
 function buildModelMenuItems() {
   const availability = chat.getProviderAvailability({ refresh: false });
   const provider = availability.activeProvider;
@@ -1641,6 +1710,7 @@ function buildContextMenu() {
     },
     buildUsageBackendMenuItem(),
     ...buildModelMenuItems(),
+    ...buildClaudeReasoningMenuItems(),
     {
       label: mt("priestessSettings"),
       click: () => openPriestessSettings()
